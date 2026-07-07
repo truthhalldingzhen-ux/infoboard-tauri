@@ -1,23 +1,27 @@
-import { useAppStore } from '../../stores/appStore'
+import { getAll } from '../../plugins/registry'
 
-const navItems = [{ id: 'dashboard', label: '仪表盘', icon: '⬡' }]
-
-export default function Sidebar() {
-  const collapsed = useAppStore((s) => s.sidebarCollapsed)
+export default function Sidebar({
+  activeId,
+  onSelect,
+}: {
+  activeId: string
+  onSelect: (id: string) => void
+}) {
+  const plugins = getAll()
 
   return (
-    <aside
-      className={`flex flex-col gap-2 p-2 transition-all duration-200 ${
-        collapsed ? 'w-0 overflow-hidden p-0' : 'w-12'
-      }`}
-    >
-      {navItems.map((item) => (
+    <aside className="flex flex-col gap-1 p-2 border-r border-border-subtle">
+      {plugins.map((p) => (
         <button
-          key={item.id}
-          className="flex items-center justify-center w-8 h-8 rounded-lg hover:bg-bg-surface-hover transition-colors"
-          title={item.label}
+          key={p.id}
+          onClick={() => onSelect(p.id)}
+          className={`
+            flex items-center justify-center w-8 h-8 rounded-lg transition-colors text-sm
+            ${activeId === p.id ? 'bg-accent/10 text-accent' : 'text-text-secondary hover:bg-bg-surface-hover'}
+          `}
+          title={p.name}
         >
-          <span className="text-sm">{item.icon}</span>
+          {p.icon}
         </button>
       ))}
     </aside>
