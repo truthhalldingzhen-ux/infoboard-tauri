@@ -42,6 +42,7 @@
 [data-theme='pink-purple'] {
   --bg-main: #00000000;
   --bg-surface: rgba(25, 15, 35, 0.6);
+  --bg-surface-solid: #d0c0e8;
   --bg-surface-hover: rgba(35, 20, 50, 0.55);
   --bg-glass: rgba(20, 10, 30, 0.45);
   --accent: #f0b8d4;
