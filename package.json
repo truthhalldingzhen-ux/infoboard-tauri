@@ -1,0 +1,13 @@
+{
+  "name": "infoboard-tauri",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "husky": "^9.1.7",
+    "lint-staged": "^17.0.8",
+    "prettier": "^3.9.4"
+  }
+}
