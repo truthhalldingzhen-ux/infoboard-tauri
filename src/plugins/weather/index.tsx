@@ -16,8 +16,7 @@ import {
   AlertCircle,
   RefreshCw,
 } from 'lucide-react'
-
-// ─── 类型 ───
+import type { PluginComponentProps } from '../types'
 
 interface WeatherData {
   city: string
@@ -31,17 +30,11 @@ interface WeatherData {
   updatedAt: number
 }
 
-// ─── 常量 ───
-
 const QWEATHER_API_KEY = 'QWEATHER_API_REMOVED'
 const DEFAULT_LOCATION = '101010100'
-const DEFAULT_CITY = '北京'
 const CACHE_KEY = 'weather-data-v2'
-const CITY_KEY = 'weather-city'
 const CACHE_DURATION = 30 * 60 * 1000
 const REFRESH_INTERVAL = 30 * 60 * 1000
-
-// ─── 图标映射 ───
 
 const ICON_MAP: Record<number, string> = {
   100: 'sun',
@@ -59,58 +52,45 @@ const ICON_MAP: Record<number, string> = {
   305: 'cloud-rain',
   306: 'cloud-rain',
   307: 'cloud-rain',
-  308: 'cloud-rain',
-  309: 'cloud-rain',
-  310: 'cloud-rain',
-  313: 'cloud-rain',
   400: 'cloud-snow',
   401: 'cloud-snow',
   402: 'cloud-snow',
   403: 'cloud-snow',
-  404: 'cloud-snow',
-  407: 'cloud-snow',
-  408: 'cloud-snow',
   500: 'cloud-fog',
   501: 'cloud-fog',
   502: 'cloud-fog',
-  503: 'cloud-fog',
-  504: 'cloud-fog',
-  507: 'cloud-fog',
-  508: 'cloud-fog',
   999: 'cloud',
 }
 
-function iconName(code: string): string {
+function iconCode(code: string): string {
   return ICON_MAP[parseInt(code)] || 'cloud'
 }
 
 function WeatherSvg({ name, size }: { name: string; size: number }) {
-  const props = { width: size, height: size, strokeWidth: 1.5, className: 'text-accent' }
+  const p = { width: size, height: size, strokeWidth: 1.5, className: 'text-accent' as string }
   switch (name) {
     case 'sun':
-      return <Sun {...props} />
+      return <Sun {...p} />
     case 'moon':
-      return <Moon {...props} />
+      return <Moon {...p} />
     case 'cloud-sun':
-      return <CloudSun {...props} />
+      return <CloudSun {...p} />
     case 'cloud-moon':
-      return <CloudMoon {...props} />
+      return <CloudMoon {...p} />
     case 'cloud':
-      return <Cloud {...props} />
+      return <Cloud {...p} />
     case 'cloud-rain':
-      return <CloudRain {...props} />
+      return <CloudRain {...p} />
     case 'cloud-snow':
-      return <CloudSnow {...props} />
+      return <CloudSnow {...p} />
     case 'cloud-lightning':
-      return <CloudLightning {...props} />
+      return <CloudLightning {...p} />
     case 'cloud-fog':
-      return <CloudFog {...props} />
+      return <CloudFog {...p} />
     default:
-      return <CloudSun {...props} />
+      return <CloudSun {...p} />
   }
 }
-
-// ─── 缓存的存储辅助 ───
 
 function loadCache(): WeatherData | null {
   try {
@@ -132,18 +112,8 @@ function saveCache(data: WeatherData) {
   }
 }
 
-function loadCity(): string {
-  try {
-    return localStorage.getItem(CITY_KEY) || DEFAULT_LOCATION
-  } catch {
-    return DEFAULT_LOCATION
-  }
-}
-
-// ─── 获取天气数据 ───
-
 async function fetchWeather(location: string): Promise<WeatherData> {
-  const base = `https://api.qweather.com/v7`
+  const base = 'https://api.qweather.com/v7'
   const key = QWEATHER_API_KEY
   const [nowRes, dailyRes] = await Promise.all([
     fetch(`${base}/weather/now?location=${location}&key=${key}&lang=zh`),
@@ -155,16 +125,17 @@ async function fetchWeather(location: string): Promise<WeatherData> {
   const daily = await dailyRes.json()
   if (now.code !== '200') throw new Error(`天气 API 错误: ${now.code}`)
   const n = now.now
+  const cityName = now.resolvedLocation || '北京'
   return {
-    city: n.city || DEFAULT_CITY,
+    city: cityName,
     temperature: parseInt(n.temp) || 0,
     description: n.text || '',
     icon: n.icon || '100',
     humidity: parseInt(n.humidity) || 0,
     windSpeed: parseInt(n.windSpeed) || 0,
     visibility: parseInt(n.vis) || 0,
-    forecast: (daily.daily || []).slice(0, 3).map((d: any) => ({
-      date: ['今天', '明天', '后天'][daily.daily.indexOf(d)] || d.fxDate,
+    forecast: (daily.daily || []).slice(0, 3).map((d: any, i: number) => ({
+      date: ['今天', '明天', '后天'][i] || d.fxDate,
       tempMax: parseInt(d.tempMax) || 0,
       tempMin: parseInt(d.tempMin) || 0,
       icon: d.iconDay || '100',
@@ -174,25 +145,21 @@ async function fetchWeather(location: string): Promise<WeatherData> {
   }
 }
 
-// ─── 主组件 ───
-
-export default function WeatherCard() {
+function WeatherCardInner() {
   const [data, setData] = useState<WeatherData | null>(loadCache)
   const [loading, setLoading] = useState(!data)
   const [error, setError] = useState<string | null>(null)
-  const locationIdRef = useRef(loadCity())
+  const locationRef = useRef(DEFAULT_LOCATION)
 
-  const refresh = useCallback(async (loc?: string) => {
-    const id = loc || locationIdRef.current
+  const refresh = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const d = await fetchWeather(id)
+      const d = await fetchWeather(locationRef.current)
       setData(d)
       saveCache(d)
     } catch (err) {
       setError(err instanceof Error ? err.message : '获取天气失败')
-      // 尝试返回缓存
       const cached = loadCache()
       if (cached) setData(cached)
     } finally {
@@ -202,34 +169,33 @@ export default function WeatherCard() {
 
   useEffect(() => {
     refresh()
-    const interval = setInterval(() => refresh(), REFRESH_INTERVAL)
+    const interval = setInterval(refresh, REFRESH_INTERVAL)
     return () => clearInterval(interval)
   }, [refresh])
 
   if (loading && !data)
     return (
-      <div className="card p-4 flex items-center gap-2 text-sm text-text-muted">
-        <Loader2 size={14} className="animate-spin" /> 加载天气...
+      <div className="flex items-center gap-2 text-sm text-text-muted">
+        <Loader2 size={14} className="animate-spin" />
+        加载天气...
       </div>
     )
-
   if (error && !data)
     return (
-      <div className="card p-4 flex items-center gap-2 text-sm" style={{ color: '#ef4444' }}>
-        <AlertCircle size={16} /> {error}
-        <button onClick={() => refresh()} className="ml-auto">
+      <div className="flex items-center gap-2 text-sm" style={{ color: '#ef4444' }}>
+        <AlertCircle size={16} />
+        {error}
+        <button onClick={refresh} className="ml-auto">
           <RefreshCw size={14} />
         </button>
       </div>
     )
-
   if (!data) return null
 
   const accent = '#DA7756'
 
   return (
-    <div className="card p-4 space-y-3">
-      {/* 当前温度 */}
+    <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div>
           <div className="flex items-center gap-1 text-xs text-text-muted mb-1">
@@ -241,11 +207,9 @@ export default function WeatherCard() {
           className="w-14 h-14 rounded-full flex items-center justify-center"
           style={{ backgroundColor: `${accent}18` }}
         >
-          <WeatherSvg name={iconName(data.icon)} size={28} />
+          <WeatherSvg name={iconCode(data.icon)} size={28} />
         </div>
       </div>
-
-      {/* 详情网格 */}
       <div className="grid grid-cols-3 gap-2">
         {[
           { icon: Droplets, label: '湿度', value: `${data.humidity}%` },
@@ -259,8 +223,6 @@ export default function WeatherCard() {
           </div>
         ))}
       </div>
-
-      {/* 3 日预报 */}
       <div className="grid grid-cols-3 gap-2">
         {data.forecast.map((day) => (
           <div
@@ -268,15 +230,13 @@ export default function WeatherCard() {
             className="flex flex-col items-center gap-1 p-2 rounded-lg bg-bg-main"
           >
             <span className="text-xs text-text-secondary">{day.date}</span>
-            <WeatherSvg name={iconName(day.icon)} size={18} />
+            <WeatherSvg name={iconCode(day.icon)} size={18} />
             <span className="text-xs font-semibold text-text-primary">
               {day.tempMax}°/{day.tempMin}°
             </span>
           </div>
         ))}
       </div>
-
-      {/* 刷新按钮 */}
       <div className="flex justify-between items-center">
         <span className="text-[10px] text-text-muted">
           {new Date(data.updatedAt).toLocaleTimeString('zh-CN', {
@@ -286,7 +246,7 @@ export default function WeatherCard() {
           更新
         </span>
         <button
-          onClick={() => refresh()}
+          onClick={refresh}
           disabled={loading}
           className="text-xs px-2 py-1 rounded-md bg-accent text-white disabled:opacity-60"
         >
@@ -295,4 +255,8 @@ export default function WeatherCard() {
       </div>
     </div>
   )
+}
+
+export default function WeatherCard(_props: PluginComponentProps) {
+  return <WeatherCardInner />
 }

@@ -1,9 +1,9 @@
 export interface SettingsState {
   theme: 'light' | 'dark' | 'pink-purple'
-  pluginVisibility: Record<string, boolean>
+  disabledPlugins: string[]
 }
 
 export const DEFAULT_SETTINGS: SettingsState = {
   theme: 'light',
-  pluginVisibility: {},
+  disabledPlugins: [],
 }

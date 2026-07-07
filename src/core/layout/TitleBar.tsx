@@ -1,60 +1,118 @@
-import { useEffect } from 'react'
-import { Minus, Maximize2, X, PanelRightClose, PanelRightOpen } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { windowMinimize, windowMaximize, windowClose, windowIsMaximized } from '../tray-bridge'
-import { useAppStore } from '../../stores/appStore'
 
 export default function TitleBar() {
-  const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed)
-  const toggleSidebar = useAppStore((s) => s.toggleSidebar)
-  const setMaximized = useAppStore((s) => s.setMaximized)
+  const [isMaximized, setIsMaximized] = useState(false)
 
   useEffect(() => {
     windowIsMaximized()
-      .then((m) => setMaximized(m))
-      .catch(console.error)
-  }, [setMaximized])
+      .then(setIsMaximized)
+      .catch(() => {})
+  }, [])
 
   const handleMaximize = async () => {
     await windowMaximize()
     const m = await windowIsMaximized()
-    setMaximized(m)
+    setIsMaximized(m)
   }
 
   return (
-    <div className="drag-region flex items-center justify-between h-10 px-3 select-none">
-      <button
-        className="titlebar-button p-1 rounded-md hover:bg-bg-surface-hover transition-colors"
-        onClick={toggleSidebar}
-      >
-        {sidebarCollapsed ? (
-          <PanelRightOpen size={16} className="text-text-secondary" />
-        ) : (
-          <PanelRightClose size={16} className="text-text-secondary" />
-        )}
-      </button>
+    <header
+      className="h-10 flex items-center justify-between px-4 select-none drag-region"
+      style={{
+        backgroundColor: 'var(--bg-surface-solid, var(--bg-surface))',
+        borderBottom: '1px solid var(--border-subtle)',
+      }}
+    >
+      {/* 左侧：应用图标 */}
+      <div className="flex items-center no-drag-region">
+        <svg
+          className="w-4 h-4"
+          style={{ color: 'var(--accent)' }}
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2"
+        >
+          <rect x="3" y="3" width="7" height="9" rx="1" />
+          <rect x="14" y="3" width="7" height="5" rx="1" />
+          <rect x="14" y="12" width="7" height="9" rx="1" />
+          <rect x="3" y="16" width="7" height="5" rx="1" />
+        </svg>
+      </div>
 
-      <span className="text-xs font-medium text-text-muted">InfoBoard</span>
-
-      <div className="flex items-center gap-1">
+      {/* 右侧：控制按钮 */}
+      <div className="flex items-center gap-1 no-drag-region">
         <button
-          className="titlebar-button p-1.5 rounded-md hover:bg-bg-surface-hover transition-colors"
+          className="w-6 h-6 flex items-center justify-center rounded hover:bg-bg-surface-hover transition-colors"
           onClick={windowMinimize}
+          title="最小化"
         >
-          <Minus size={14} className="text-text-secondary" />
+          <svg
+            className="w-3.5 h-3.5 text-text-muted"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="2"
+          >
+            <path d="M5 12h14" />
+          </svg>
         </button>
+
         <button
-          className="titlebar-button p-1.5 rounded-md hover:bg-bg-surface-hover transition-colors"
+          className="w-6 h-6 flex items-center justify-center rounded hover:bg-bg-surface-hover transition-colors"
           onClick={handleMaximize}
+          title={isMaximized ? '还原' : '最大化'}
         >
-          <Maximize2 size={14} className="text-text-secondary" />
+          {isMaximized ? (
+            <svg
+              className="w-3.5 h-3.5 text-text-muted"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="2"
+            >
+              <path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3" />
+            </svg>
+          ) : (
+            <svg
+              className="w-3.5 h-3.5 text-text-muted"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="2"
+            >
+              <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+            </svg>
+          )}
         </button>
+
         <button
-          className="titlebar-button p-1.5 rounded-md hover:bg-red-500/20 transition-colors group"
+          className="w-6 h-6 flex items-center justify-center rounded hover:bg-red-500 hover:text-white transition-colors group"
           onClick={windowClose}
+          title="关闭"
         >
-          <X size={14} className="text-text-secondary group-hover:text-red-500" />
+          <svg
+            className="w-3.5 h-3.5 text-text-muted group-hover:text-white"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="2"
+          >
+            <path d="M18 6L6 18M6 6l12 12" />
+          </svg>
         </button>
       </div>
-    </div>
+    </header>
   )
 }

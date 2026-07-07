@@ -1,16 +1,30 @@
-import { useState, useMemo, createElement } from 'react'
-import { getAll, getById } from '../plugins/registry'
-import type { PluginManifest } from '../plugins/types'
+import { useEffect, useState } from 'react'
+import { pluginRegistry } from '../plugins/registry'
+import type { InfoBoardPlugin } from '../plugins/types'
 
-export default function PluginHost() {
-  const [activeId] = useState<string>(() => {
-    const plugins = getAll()
-    return plugins.length > 0 ? plugins[0].id : ''
+export function initPluginSystem(): Promise<void> {
+  pluginRegistry.clear()
+  return import('../plugins').then(() => {
+    console.log(`[PluginHost] 已加载 ${pluginRegistry.size} 个插件`)
   })
-
-  const activePlugin = useMemo(() => getById(activeId), [activeId])
-
-  return <>{activePlugin && createElement(activePlugin.component)}</>
 }
 
-export type { PluginManifest }
+export function usePluginSystem(): void {
+  useEffect(() => {
+    if (pluginRegistry.size === 0) {
+      initPluginSystem()
+    }
+  }, [])
+}
+
+export function usePlugins(section: 'info' | 'tool'): InfoBoardPlugin[] {
+  const [, setVersion] = useState(0)
+
+  useEffect(() => {
+    if (pluginRegistry.size === 0) {
+      initPluginSystem().then(() => setVersion((v) => v + 1))
+    }
+  }, [])
+
+  return pluginRegistry.getPluginsBySection(section)
+}

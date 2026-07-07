@@ -16,7 +16,7 @@ interface SettingsStore extends SettingsState {
   loaded: boolean
   init: () => Promise<void>
   setTheme: (theme: 'light' | 'dark' | 'pink-purple') => void
-  setPluginVisibility: (id: string, visible: boolean) => void
+  togglePlugin: (id: string) => void
 }
 
 export const useSettingsStore = create<SettingsStore>((set, get) => ({
@@ -49,16 +49,13 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     }
   },
 
-  setPluginVisibility: async (id, visible) => {
-    set((state) => ({
-      pluginVisibility: { ...state.pluginVisibility, [id]: visible },
-    }))
+  togglePlugin: async (id) => {
+    const current = get().disabledPlugins
+    const next = current.includes(id) ? current.filter((d) => d !== id) : [...current, id]
+    set({ disabledPlugins: next })
     try {
       const s = await getStore()
-      await s.set('settings', {
-        ...get(),
-        pluginVisibility: { ...get().pluginVisibility, [id]: visible },
-      })
+      await s.set('settings', { ...get(), disabledPlugins: next })
     } catch {
       /* */
     }

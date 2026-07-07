@@ -1,7 +1,8 @@
 export const manifest = {
   id: 'opencode',
   name: 'OpenCode Go',
-  description: '查询 OpenCode Go + MiniMax Token 用量',
+  section: 'info' as const,
   icon: '⚡',
-  category: 'info',
-} as const
+  color: '#6C5CE7',
+  description: '查询 OpenCode Go + MiniMax Token 用量',
+}

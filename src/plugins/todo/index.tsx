@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { Check, Plus, Trash2, Pencil, X, CheckSquare, Square } from 'lucide-react'
 import { useTodo } from './useTodo'
+import type { PluginComponentProps } from '../types'
 
-export default function TodoCard() {
+export default function TodoCard(_props: PluginComponentProps) {
   const { todos, addTodo, toggleTodo, removeTodo, editTodo } = useTodo()
   const [newText, setNewText] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -13,30 +14,15 @@ export default function TodoCard() {
     setNewText('')
   }
 
-  const handleEditStart = (id: string, text: string) => {
-    setEditingId(id)
-    setEditText(text)
-  }
-
-  const handleEditSave = async (id: string) => {
-    if (editText.trim()) {
-      await editTodo(id, editText.trim())
-    }
-    setEditingId(null)
-  }
-
   const activeTodos = todos.filter((t) => !t.done)
   const doneTodos = todos.filter((t) => t.done)
 
   return (
-    <div className="card p-4 space-y-3">
+    <div className="space-y-3 p-4">
       <div className="flex items-center gap-2 text-xs font-semibold text-text-primary">
         <CheckSquare size={14} className="text-accent" />
-        待办事项
-        <span className="text-text-muted font-normal">({todos.length})</span>
+        待办事项 <span className="text-text-muted font-normal">({todos.length})</span>
       </div>
-
-      {/* 输入框 */}
       <div className="flex gap-2">
         <input
           className="input flex-1"
@@ -49,12 +35,9 @@ export default function TodoCard() {
           <Plus size={14} />
         </button>
       </div>
-
-      {/* 未完成 */}
       {activeTodos.length === 0 && doneTodos.length === 0 && (
         <div className="text-xs text-text-muted text-center py-4">暂无待办</div>
       )}
-
       {activeTodos.length > 0 && (
         <div className="space-y-1">
           {activeTodos.map((todo) => (
@@ -65,15 +48,20 @@ export default function TodoCard() {
               editText={editText}
               onToggle={() => toggleTodo(todo.id)}
               onRemove={() => removeTodo(todo.id)}
-              onEditStart={() => handleEditStart(todo.id, todo.text)}
+              onEditStart={() => {
+                setEditingId(todo.id)
+                setEditText(todo.text)
+              }}
               onEditChange={setEditText}
-              onEditSave={() => handleEditSave(todo.id)}
+              onEditSave={async () => {
+                if (editText.trim()) await editTodo(todo.id, editText.trim())
+                setEditingId(null)
+              }}
               onEditCancel={() => setEditingId(null)}
             />
           ))}
         </div>
       )}
-
       {doneTodos.length > 0 && (
         <details>
           <summary className="text-xs text-text-muted cursor-pointer">
@@ -127,7 +115,6 @@ function TodoRow({
       <button onClick={onToggle} className="text-text-muted hover:text-accent transition-colors">
         {todo.done ? <CheckSquare size={14} className="text-accent" /> : <Square size={14} />}
       </button>
-
       {isEditing ? (
         <input
           className="input flex-1 py-1 text-sm"
@@ -146,7 +133,6 @@ function TodoRow({
           {todo.text}
         </span>
       )}
-
       <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
         {!isEditing ? (
           <>

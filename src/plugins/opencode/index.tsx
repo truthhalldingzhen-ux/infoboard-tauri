@@ -3,6 +3,7 @@ import { RefreshCw, AlertCircle, Database, Zap } from 'lucide-react'
 import { useOpenCodeStore } from './store'
 import * as bridge from './bridge'
 import type { RefreshResult } from './types'
+import type { PluginComponentProps } from '../types'
 
 /** 格式百分比 */
 function fmtPercent(n: number | undefined | null): string {
@@ -38,7 +39,7 @@ function PercentBar({ percent, color }: { percent: number; color: string }) {
   )
 }
 
-/** 单行用量（标签 + 百分比 + 重置时间） */
+/** 单行用量 */
 function UsageRow({
   label,
   percent,
@@ -66,7 +67,6 @@ function UsageRow({
   )
 }
 
-/** 刷新 Cookie 按钮（含状态） */
 type RefreshState =
   | { kind: 'idle' }
   | { kind: 'running' }
@@ -76,36 +76,29 @@ type RefreshState =
 function RefreshButton({ onRefreshed }: { onRefreshed: () => void }) {
   const [state, setState] = useState<RefreshState>({ kind: 'idle' })
   const timers = useRef<ReturnType<typeof setTimeout>[]>([])
-
   const clearTimers = useCallback(() => {
     timers.current.forEach(clearTimeout)
     timers.current = []
   }, [])
-
   useEffect(() => {
     return clearTimers
   }, [clearTimers])
 
   const handleClick = useCallback(async () => {
     if (state.kind === 'running') return
-
     setState({ kind: 'running' })
     try {
       const mtimeBefore = await bridge.getCookieMtime()
       const result: RefreshResult = await bridge.refreshCookie()
-
       if (!result.started) {
         setState({ kind: 'error', message: result.message || '启动失败' })
         const t = setTimeout(() => setState({ kind: 'idle' }), 8000)
         timers.current.push(t)
         return
       }
-
-      // 轮询 cookie mtime
       const POLL_MS = 1000
       const MAX_WAIT_MS = 15000
       const startTs = Date.now()
-
       const poll = async () => {
         if (Date.now() - startTs > MAX_WAIT_MS) {
           setState({ kind: 'error', message: '15s 内 cookie 未更新' })
@@ -128,7 +121,6 @@ function RefreshButton({ onRefreshed }: { onRefreshed: () => void }) {
         const t = setTimeout(poll, POLL_MS)
         timers.current.push(t)
       }
-
       const t = setTimeout(poll, POLL_MS)
       timers.current.push(t)
     } catch (err) {
@@ -149,7 +141,7 @@ function RefreshButton({ onRefreshed }: { onRefreshed: () => void }) {
         className="text-xs px-2.5 py-1 rounded-md border-none cursor-pointer whitespace-nowrap transition-all disabled:cursor-wait disabled:opacity-60"
         style={{
           backgroundColor: isRunning ? 'var(--accent-light)' : 'var(--accent)',
-          color: isRunning ? 'var(--accent)' : '#fff',
+          color: '#fff',
         }}
       >
         {isRunning ? (
@@ -178,41 +170,7 @@ function RefreshButton({ onRefreshed }: { onRefreshed: () => void }) {
   )
 }
 
-/** 错误卡片 */
-function ErrorCard({ error, onRefresh }: { error: string; onRefresh: () => void }) {
-  return (
-    <div className="card p-4">
-      <div className="flex items-center gap-2 text-sm" style={{ color: '#ef4444' }}>
-        <AlertCircle size={16} />
-        <span className="flex-1 truncate">{error}</span>
-        <RefreshButton onRefreshed={onRefresh} />
-      </div>
-    </div>
-  )
-}
-
-/** 加载卡片 */
-function LoadingCard() {
-  return (
-    <div className="card p-4 flex items-center gap-2 text-sm text-text-muted">
-      <RefreshCw size={14} className="animate-spin" />
-      加载中...
-    </div>
-  )
-}
-
-/** 无数据卡片 */
-function NoDataCard() {
-  return (
-    <div className="card p-4 flex items-center gap-2 text-sm text-text-muted">
-      <Database size={16} />
-      未检测到 OpenCode 数据
-    </div>
-  )
-}
-
-/** OpenCode 用量卡片组件 */
-export default function OpenCodeCard() {
+function OpenCodeCardInner() {
   const usage = useOpenCodeStore((s) => s.usage)
   const minimax = useOpenCodeStore((s) => s.minimax)
   const loading = useOpenCodeStore((s) => s.loading)
@@ -230,19 +188,13 @@ export default function OpenCodeCard() {
         bridge.getUsage(),
         bridge.getMiniMax(),
       ])
-
       if (usageResult.status === 'fulfilled') {
         setUsage(usageResult.value)
-        if (usageResult.value.error) {
-          setError(usageResult.value.error)
-        }
+        if (usageResult.value.error) setError(usageResult.value.error)
       } else {
-        setError(usageResult.reason?.toString() || '用量查询失败')
+        setError('用量查询失败')
       }
-
-      if (minimaxResult.status === 'fulfilled') {
-        setMiniMax(minimaxResult.value)
-      }
+      if (minimaxResult.status === 'fulfilled') setMiniMax(minimaxResult.value)
     } catch (err) {
       setError(err instanceof Error ? err.message : '查询失败')
     } finally {
@@ -250,7 +202,6 @@ export default function OpenCodeCard() {
     }
   }, [setUsage, setMiniMax, setLoading, setError])
 
-  // 初始加载 + 每 30 秒轮询
   useEffect(() => {
     fetchData()
     const interval = setInterval(fetchData, 30_000)
@@ -259,41 +210,45 @@ export default function OpenCodeCard() {
 
   const accent = '#6C5CE7'
 
-  // 无数据
   if (usage && !usage.db_exists && !loading && !error) {
-    return <NoDataCard />
+    return (
+      <div className="flex items-center gap-2 text-sm text-text-muted">
+        <Database size={16} />
+        未检测到 OpenCode 数据
+      </div>
+    )
   }
-
-  // 首次加载中
-  if (loading && !usage) {
-    return <LoadingCard />
-  }
-
-  // 有错误且无数据
-  if (error && !usage) {
-    return <ErrorCard error={error} onRefresh={fetchData} />
-  }
-
+  if (loading && !usage)
+    return (
+      <div className="flex items-center gap-2 text-sm text-text-muted">
+        <RefreshCw size={14} className="animate-spin" />
+        加载中...
+      </div>
+    )
+  if (error && !usage)
+    return (
+      <div className="card p-4 flex items-center gap-2 text-sm" style={{ color: '#ef4444' }}>
+        <AlertCircle size={16} />
+        <span className="flex-1 truncate">{error}</span>
+        <RefreshButton onRefreshed={fetchData} />
+      </div>
+    )
   if (!usage) return null
 
   return (
-    <div className="card p-4 space-y-3">
-      {/* 错误提示行（有数据时） */}
+    <div className="space-y-3">
       {error && (
         <div className="flex items-center gap-2 text-xs" style={{ color: '#ef4444' }}>
           <AlertCircle size={12} />
           <span className="flex-1 truncate">{error}</span>
         </div>
       )}
-
-      {/* OpenCode 用量 */}
       <div>
         <div className="flex items-center gap-2 mb-3">
           <Zap size={16} className="text-accent" />
           <span className="text-xs font-semibold text-text-primary">OpenCode Go</span>
           <div className="flex-1" />
         </div>
-
         <UsageRow
           label="滚动窗口"
           percent={usage.today_tokens}
@@ -313,15 +268,12 @@ export default function OpenCodeCard() {
           color={accent}
         />
       </div>
-
-      {/* MiniMax 用量 */}
       {minimax && (
         <div>
           <div className="flex items-center gap-2 mb-3">
             <Zap size={16} className="text-accent" />
             <span className="text-xs font-semibold text-text-primary">MiniMax Token 计划</span>
           </div>
-
           <UsageRow
             label="滚动窗口"
             percent={minimax.rolling_used}
@@ -336,9 +288,11 @@ export default function OpenCodeCard() {
           />
         </div>
       )}
-
-      {/* 刷新按钮 */}
       <RefreshButton onRefreshed={fetchData} />
     </div>
   )
+}
+
+export default function OpenCodeCard(_props: PluginComponentProps) {
+  return <OpenCodeCardInner />
 }
