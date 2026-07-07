@@ -1,42 +1,51 @@
 import { useState, useCallback, useEffect } from 'react'
-import TitleBar from './core/layout/TitleBar'
-import InfoSection from './core/layout/InfoSection'
-import ToolSection from './core/layout/ToolSection'
-import Toast from './core/toast/Toast'
-import { windowClose } from './core/tray-bridge'
-import { usePluginSystem } from './core/plugin-host'
-import './plugins/index'
+import { TitleBar } from './components/TitleBar'
+import { InfoSection } from './components/InfoSection'
+import { ToolSection } from './components/ToolSection'
 
 export default function App() {
-  usePluginSystem()
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
-  const [titleBarVisible, setTitleBarVisible] = useState(true)
 
+  // 右键菜单
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
     setMenu({ x: e.clientX, y: e.clientY })
   }, [])
 
+  // 点击任意位置关闭菜单
   useEffect(() => {
     const close = () => setMenu(null)
     window.addEventListener('click', close)
     return () => window.removeEventListener('click', close)
   }, [])
 
-  const toggleTitleBar = useCallback(() => {
-    setTitleBarVisible((v) => !v)
+  // 切换标题栏显隐
+  const toggleTitleBar = useCallback(async () => {
+    if (window.electronAPI) {
+      await window.electronAPI.toggleTitleBar()
+    }
     setMenu(null)
+  }, [])
+
+  // 关闭窗口
+  const closeWindow = useCallback(async () => {
+    if (window.electronAPI) {
+      await window.electronAPI.close()
+    }
   }, [])
 
   return (
     <div className="min-h-screen bg-bg-main flex flex-col" onContextMenu={handleContextMenu}>
-      {titleBarVisible && <TitleBar />}
+      {/* 自定义标题栏 */}
+      <TitleBar />
+
+      {/* 内容区 */}
       <main className="flex-1 flex flex-col p-5 gap-6 overflow-auto">
         <InfoSection />
         <ToolSection />
       </main>
-      <Toast />
 
+      {/* 右键菜单 */}
       {menu && (
         <div
           className="fixed z-50 py-1 rounded-lg shadow-lg border"
@@ -57,7 +66,7 @@ export default function App() {
             onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
             onClick={toggleTitleBar}
           >
-            {titleBarVisible ? '隐藏标题栏' : '显示标题栏'}
+            显示/隐藏标题栏
           </button>
           <div className="mx-2 my-1" style={{ borderTop: '1px solid var(--border-subtle)' }} />
           <button
@@ -67,10 +76,7 @@ export default function App() {
               (e.currentTarget.style.backgroundColor = 'var(--bg-surface-hover)')
             }
             onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-            onClick={() => {
-              windowClose()
-              setMenu(null)
-            }}
+            onClick={closeWindow}
           >
             关闭窗口
           </button>

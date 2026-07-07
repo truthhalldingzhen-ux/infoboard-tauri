@@ -1,19 +1,12 @@
-import { pluginRegistry } from './registry'
-import type { InfoBoardPlugin } from './types'
-import OpenCodeCard from './opencode/index'
-import { manifest as opencodeManifest } from './opencode/manifest'
-import WeatherCard from './weather/index'
-import { manifest as weatherManifest } from './weather/manifest'
-import TodoCard from './todo/index'
-import { manifest as todoManifest } from './todo/manifest'
-import SettingsPanel from './settings/index'
-import { manifest as settingsManifest } from './settings/manifest'
+import type { InfoBoardPlugin } from '../core/types'
+import { weatherPlugin } from './weather'
+import { todoPlugin } from './todo'
+import { openCodeGoPlugin } from './opencode-go'
+import { settingsPlugin } from './settings'
 
-const plugins: InfoBoardPlugin[] = [
-  { manifest: opencodeManifest, Component: OpenCodeCard },
-  { manifest: weatherManifest, Component: WeatherCard },
-  { manifest: todoManifest, Component: TodoCard },
-  { manifest: settingsManifest, Component: SettingsPanel },
+export const plugins: InfoBoardPlugin[] = [
+  weatherPlugin,
+  todoPlugin,
+  openCodeGoPlugin,
+  settingsPlugin,
 ]
-
-pluginRegistry.registerAll(plugins)
