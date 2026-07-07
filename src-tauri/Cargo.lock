@@ -1567,6 +1567,7 @@ dependencies = [
 name = "infoboard-tauri"
 version = "0.1.0"
 dependencies = [
+ "dirs",
  "regex",
  "reqwest 0.12.28",
  "serde",

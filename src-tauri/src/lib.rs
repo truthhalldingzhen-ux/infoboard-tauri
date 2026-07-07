@@ -4,6 +4,10 @@ mod core {
     pub mod window;
 }
 
+mod plugins {
+    pub mod opencode;
+}
+
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("你好, {}! 欢迎使用 InfoBoard", name)
@@ -24,6 +28,11 @@ pub fn run() {
             core::window::window_close,
             core::window::window_is_maximized,
             core::window::window_is_visible,
+            plugins::opencode::opencode_get_usage,
+            plugins::opencode::opencode_get_sessions,
+            plugins::opencode::opencode_get_minimax,
+            plugins::opencode::opencode_refresh_cookie,
+            plugins::opencode::opencode_get_cookie_mtime,
         ])
         .build(tauri::generate_context!())
         .expect("启动 InfoBoard 失败");
