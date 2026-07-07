@@ -26,9 +26,31 @@ export function initTauriShim() {
   }
 
   window.opencodeDB = {
-    getUsage: () => invoke('opencode_get_usage'),
+    getUsage: () => {
+      console.log('[opencode] 调用 getUsage')
+      return invoke('opencode_get_usage')
+        .then((r) => {
+          console.log('[opencode] getUsage 结果:', r)
+          return r
+        })
+        .catch((e) => {
+          console.error('[opencode] getUsage 失败:', e)
+          throw e
+        })
+    },
     getSessions: () => invoke('opencode_get_sessions'),
-    getMiniMax: () => invoke('opencode_get_minimax'),
+    getMiniMax: () => {
+      console.log('[opencode] 调用 getMiniMax')
+      return invoke('opencode_get_minimax')
+        .then((r) => {
+          console.log('[opencode] getMiniMax 结果:', r)
+          return r
+        })
+        .catch((e) => {
+          console.error('[opencode] getMiniMax 失败:', e)
+          throw e
+        })
+    },
     refreshCookie: () => invoke('opencode_refresh_cookie'),
     getCookieMtime: () => invoke('opencode_get_cookie_mtime'),
   }

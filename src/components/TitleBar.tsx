@@ -36,8 +36,6 @@ export function TitleBar() {
     <header
       className="h-10 flex items-center justify-between px-4 select-none drag-region"
       style={{
-        // 实色背景压住 DWM 白色边框（标题栏区域），不用 backdrop-blur
-        backgroundColor: 'var(--bg-surface-solid, var(--bg-surface))',
         borderBottom: '1px solid var(--border-subtle)',
       }}
     >

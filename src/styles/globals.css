@@ -301,6 +301,11 @@ body {
   border-color: var(--accent);
 }
 
+/* 标题栏隐藏（右键菜单切换） */
+.titlebar-hidden header {
+  display: none;
+}
+
 /* 隐藏滚动条（逐时预报横向滚动用） */
 .scrollbar-hide {
   -ms-overflow-style: none;
