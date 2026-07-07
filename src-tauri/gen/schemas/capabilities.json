@@ -1,0 +1,9 @@
+{
+  "default": {
+    "identifier": "default",
+    "description": "默认权限集 - 允许所有核心命令",
+    "local": true,
+    "windows": ["main"],
+    "permissions": ["core:default", "store:default"]
+  }
+}
