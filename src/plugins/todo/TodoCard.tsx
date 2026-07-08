@@ -295,25 +295,26 @@ function ExpandedView({
             style={{ color: 'var(--text-primary)', fontFamily: 'Inter' }}
             onClick={(e) => e.stopPropagation()}
           />
-          <input
-            type="date"
-            ref={datePickerRef}
-            onChange={(e) => {
-              if (e.target.value) {
-                setDeadlineValue(e.target.value)
-              }
-            }}
-            style={{ display: 'none' }}
-          />
-          <button
-            className="p-1 rounded hover:bg-bg-surface-hover transition-colors shrink-0"
-            onClick={(e) => {
-              e.stopPropagation()
-              datePickerRef.current?.showPicker()
-            }}
+          <div
+            className="relative shrink-0"
+            style={{ width: 28, height: 28 }}
+            onClick={(e) => e.stopPropagation()}
           >
-            <Calendar size={14} color="var(--text-muted)" />
-          </button>
+            <input
+              type="date"
+              ref={datePickerRef}
+              onChange={(e) => {
+                if (e.target.value) {
+                  setDeadlineValue(e.target.value)
+                }
+              }}
+              className="absolute inset-0 opacity-0 cursor-pointer"
+              style={{ width: '100%', height: '100%' }}
+            />
+            <div className="pointer-events-none p-1">
+              <Calendar size={14} color="var(--text-muted)" />
+            </div>
+          </div>
         </div>
       </div>
 

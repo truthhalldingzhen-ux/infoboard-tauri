@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
+import GlobalToast from './core/GlobalToast'
 import { initTauriShim } from './tauri-shim'
 import './styles/globals.css'
 
@@ -32,6 +33,7 @@ function Root() {
   return (
     <div className={titleBarVisible ? '' : 'titlebar-hidden'}>
       <App />
+      <GlobalToast />
     </div>
   )
 }
