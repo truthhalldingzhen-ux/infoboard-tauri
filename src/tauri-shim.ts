@@ -41,7 +41,15 @@ export function initTauriShim() {
     getSessions: () => invoke('opencode_get_sessions'),
     getMiniMax: () => {
       console.log('[opencode] 调用 getMiniMax')
-      return invoke('opencode_get_minimax')
+      // 从设置中读取 MiniMax API Key
+      let apiKey: string | undefined
+      try {
+        const s = localStorage.getItem('infoboard-settings')
+        if (s) apiKey = JSON.parse(s).minimaxApiKey
+      } catch {
+        /* */
+      }
+      return invoke('opencode_get_minimax', { apiKey: apiKey || '' })
         .then((r) => {
           console.log('[opencode] getMiniMax 结果:', r)
           return r

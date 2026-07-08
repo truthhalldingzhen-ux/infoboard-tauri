@@ -155,6 +155,25 @@ export function SettingsPanel() {
         </div>
       </section>
 
+      {/* MiniMax API 配置 */}
+      <section>
+        <SectionTitle>MiniMax API</SectionTitle>
+        <div className="mt-2 flex flex-col gap-2">
+          <div>
+            <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>
+              API Key
+            </label>
+            <input
+              type="password"
+              className="input text-xs"
+              value={settings.minimaxApiKey}
+              placeholder="MiniMax Token 计划的 API Key"
+              onChange={(e) => updateSettings({ minimaxApiKey: e.target.value })}
+            />
+          </div>
+        </div>
+      </section>
+
       {/* 小牛翻译 API 配置 */}
       <section>
         <SectionTitle>小牛翻译 API</SectionTitle>
