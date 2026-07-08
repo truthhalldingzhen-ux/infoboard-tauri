@@ -21,12 +21,14 @@ let ACCENT = '#DA7756'
 // ─── 日期格式化 ───
 
 /** 将 "YYYY-MM-DD" 转为中文显示格式，如 "6月20日"（跨年显示年份） */
-function formatDeadline(iso: string): string {
-  const match = iso.match(ISO_DATE_REGEX)
-  if (!match) return iso // 旧版自由文本直接返回
+function formatDeadline(iso: string | undefined | null): string {
+  if (!iso) return ''
+  const match = String(iso).match(ISO_DATE_REGEX)
+  if (!match) return String(iso)
   const year = parseInt(match[1], 10)
   const month = parseInt(match[2], 10)
   const day = parseInt(match[3], 10)
+  if (isNaN(year) || isNaN(month) || isNaN(day)) return String(iso)
   if (year !== new Date().getFullYear()) {
     return `${year}年${month}月${day}日`
   }
@@ -176,14 +178,14 @@ function CompactView({ activeCount, firstTodo }: { activeCount: number; firstTod
             {firstTodo.text}
           </span>
           {/* 截止时间 */}
-          {firstTodo.deadline && (
+          {firstTodo.deadline ? (
             <span className="flex items-center gap-1 shrink-0">
               <Calendar size={11} color="var(--text-muted)" />
               <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
                 {formatDeadline(firstTodo.deadline)}
               </span>
             </span>
-          )}
+          ) : null}
         </div>
       )}
     </div>
@@ -413,7 +415,7 @@ function TodoItem({
       </span>
 
       {/* 截止时间 */}
-      {todo.deadline && (
+      {todo.deadline ? (
         <span className="flex items-center gap-1 shrink-0">
           <Calendar size={11} color={isOverdue ? '#DC2626' : 'var(--text-muted)'} />
           <span
@@ -423,7 +425,7 @@ function TodoItem({
             {formatDeadline(todo.deadline)}
           </span>
         </span>
-      )}
+      ) : null}
 
       {/* 删除按钮（悬停显示） */}
       {isHovered && (
