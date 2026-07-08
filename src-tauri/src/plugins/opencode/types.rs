@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// OpenCode Go 仪表盘解析出的用量数据
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UsageStats {
     pub db_exists: bool,
     pub today_tokens: f64,
@@ -16,6 +17,7 @@ pub struct UsageStats {
 
 /// 会话信息（opencode.ai 不提供此接口，留空）
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SessionInfo {
     pub id: String,
     pub model_id: String,
@@ -25,6 +27,7 @@ pub struct SessionInfo {
 
 /// MiniMax Token 计划用量
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MiniMaxUsage {
     pub rolling_used: f64,
     pub rolling_reset_ms: i64,
@@ -36,6 +39,7 @@ pub struct MiniMaxUsage {
 
 /// Cookie 刷新结果
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RefreshResult {
     pub started: bool,
     pub message: Option<String>,
