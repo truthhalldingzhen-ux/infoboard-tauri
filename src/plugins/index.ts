@@ -4,6 +4,8 @@ import { todoPlugin } from './todo'
 import { openCodeGoPlugin } from './opencode-go'
 import { dynamicIslandPlugin } from './dynamic-island'
 import { settingsPlugin } from './settings'
+import { screenshotPlugin } from './screenshot'
+import { translatePlugin } from './translate'
 
 export const plugins: InfoBoardPlugin[] = [
   dynamicIslandPlugin,
@@ -11,4 +13,6 @@ export const plugins: InfoBoardPlugin[] = [
   todoPlugin,
   openCodeGoPlugin,
   settingsPlugin,
+  screenshotPlugin,
+  translatePlugin,
 ]

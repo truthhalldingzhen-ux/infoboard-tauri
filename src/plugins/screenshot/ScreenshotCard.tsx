@@ -6,7 +6,6 @@
  */
 
 import type { PluginComponentProps } from '../../core/types'
-import { withAlpha } from '../../utils/themeColor'
 
 /** Lucide camera 图标内联 SVG */
 function CameraIcon({ size = 20, color = 'currentColor' }: { size?: number; color?: string }) {
@@ -28,8 +27,9 @@ function CameraIcon({ size = 20, color = 'currentColor' }: { size?: number; colo
 }
 
 export function ScreenshotCard({ manifest }: PluginComponentProps) {
+  const color = manifest.color ?? 'var(--accent)'
   const handleStart = () => {
-    window.electronAPI.startScreenshot()
+    window.electronAPI?.startScreenshot?.()
   }
 
   return (
@@ -38,12 +38,12 @@ export function ScreenshotCard({ manifest }: PluginComponentProps) {
         onClick={handleStart}
         className="flex flex-col items-center gap-2 rounded-xl px-6 py-4 transition-all hover:scale-105 active:scale-95"
         style={{
-          backgroundColor: withAlpha(manifest.color, 0.08),
-          border: `1.5px solid ${manifest.color}`,
+          backgroundColor: `color-mix(in srgb, ${color} 8%, transparent)`,
+          border: `1.5px solid ${color}`,
         }}
       >
-        <CameraIcon size={28} color={manifest.color} />
-        <span className="text-xs font-medium" style={{ color: manifest.color }}>
+        <CameraIcon size={28} color={color} />
+        <span className="text-xs font-medium" style={{ color }}>
           开始截图
         </span>
       </button>

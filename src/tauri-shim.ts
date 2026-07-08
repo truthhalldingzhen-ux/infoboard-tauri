@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import * as autostart from './core/autostart-bridge'
 
 /** 将旧版 Electron IPC 映射到 Tauri invoke */
 export function initTauriShim() {
@@ -14,10 +15,10 @@ export function initTauriShim() {
       return true
     },
     titleBarVisible: async () => true,
-    setAutoStart: async () => false,
-    getAutoStart: async () => false,
+    setAutoStart: (enabled: boolean) => autostart.setEnabled(enabled).then(() => true),
+    getAutoStart: () => autostart.isEnabled(),
     startScreenshot: () => {
-      /* 暂不支持 */
+      console.log('[截图] 功能暂未实现')
     },
     confirmScreenshot: () => {},
     cancelScreenshot: () => {},

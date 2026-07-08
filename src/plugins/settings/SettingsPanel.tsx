@@ -13,6 +13,8 @@ import { useSettings } from './useSettings'
 import { pluginRegistry } from '../../core/PluginRegistry'
 import type { ThemeMode } from './types'
 import { THEME_PREVIEWS } from './types'
+import * as autostart from '../../core/autostart-bridge'
+import * as niutrans from '../translate/bridge'
 
 /** 邮箱账户（从主进程读取） */
 interface MailAccount {
@@ -47,18 +49,33 @@ export function SettingsPanel() {
   // 邮箱配置（Tauri 暂不支持）
   useEffect(() => {}, [])
 
+  // 读取小牛翻译配置状态
+  useEffect(() => {
+    niutrans
+      .hasApiKey()
+      .then((exists) => {
+        setNiutransHasKey(exists)
+      })
+      .catch(() => {})
+  }, [])
+
   // 从系统读取开机自启动状态
   useEffect(() => {
-    window.electronAPI?.getAutoStart?.().then((enabled) => {
-      setAutoStart(enabled)
-    })
+    autostart
+      .isEnabled()
+      .then((enabled) => {
+        setAutoStart(enabled)
+      })
+      .catch(() => {
+        // 读取失败，默认关闭
+      })
   }, [])
 
   /** 切换开机自启动 */
   const handleAutoStartToggle = useCallback(async () => {
     const next = !autoStart
     setAutoStart(next)
-    await window.electronAPI?.setAutoStart?.(next)
+    await autostart.setEnabled(next)
     updateSettings({ autoStart: next })
   }, [autoStart, updateSettings])
 
@@ -213,9 +230,9 @@ export function SettingsPanel() {
             onClick={async () => {
               try {
                 if (niutransApiKey) {
-                  await window.niutransAPI?.setApiKey?.(niutransApiKey)
+                  await niutrans.setApiKey(niutransApiKey)
                 }
-                await window.niutransAPI?.setAppId?.(niutransAppId)
+                await niutrans.setAppId(niutransAppId)
                 window.toastAPI?.show?.({ message: '小牛翻译 API 已保存' })
                 setNiutransHasKey(true)
                 setNiutransApiKey('')
@@ -253,11 +270,31 @@ export function SettingsPanel() {
       {/* 系统 */}
       <section>
         <SectionTitle>系统</SectionTitle>
-        <div className="mt-2 flex items-center justify-between">
-          <span className="text-sm" style={{ color: 'var(--text-primary)' }}>
-            开机自启动
-          </span>
-          <ToggleSwitch checked={autoStart} onChange={handleAutoStartToggle} />
+        <div className="mt-2 flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm" style={{ color: 'var(--text-primary)' }}>
+              开机自启动
+            </span>
+            <ToggleSwitch checked={autoStart} onChange={handleAutoStartToggle} />
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm" style={{ color: 'var(--text-primary)' }}>
+              全局快捷键
+            </span>
+            <kbd
+              style={{
+                fontSize: '11px',
+                padding: '2px 8px',
+                borderRadius: '4px',
+                backgroundColor: 'var(--bg-surface)',
+                border: '1px solid var(--border-subtle)',
+                color: 'var(--text-secondary)',
+                fontFamily: 'monospace',
+              }}
+            >
+              Ctrl+Shift+I
+            </kbd>
+          </div>
         </div>
       </section>
 

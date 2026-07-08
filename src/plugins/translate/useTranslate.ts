@@ -1,5 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import type { TargetLangCode, TranslateResult } from './types'
+import * as niutrans from './bridge'
+import { writeText } from '../../core/clipboard-bridge'
 
 export interface UseTranslateReturn {
   inputText: string
@@ -35,7 +37,7 @@ export function useTranslate(): UseTranslateReturn {
 
   async function checkApiKey() {
     try {
-      const exists = await window.niutransAPI.hasApiKey()
+      const exists = await niutrans.hasApiKey()
       setHasApiKey(exists)
     } catch {
       setHasApiKey(false)
@@ -44,7 +46,7 @@ export function useTranslate(): UseTranslateReturn {
 
   async function refreshCharCount() {
     try {
-      const count = await window.niutransAPI.getCharCount()
+      const count = await niutrans.getCharCount()
       setCharCount(count)
     } catch {
       // ignore
@@ -65,7 +67,7 @@ export function useTranslate(): UseTranslateReturn {
     setResult(null)
 
     try {
-      const res = await window.niutransAPI.translate(text, targetLang)
+      const res = await niutrans.translate(text, targetLang)
       setResult(res)
       refreshCharCount()
     } catch (err: unknown) {
@@ -82,11 +84,7 @@ export function useTranslate(): UseTranslateReturn {
 
   const copyResult = useCallback(async () => {
     if (!result?.text) return
-    try {
-      await window.clipboard.writeText(result.text)
-    } catch {
-      throw new Error('复制失败')
-    }
+    await writeText(result.text)
   }, [result])
 
   return {

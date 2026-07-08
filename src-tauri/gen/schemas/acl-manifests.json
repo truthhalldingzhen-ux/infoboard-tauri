@@ -1,4 +1,45 @@
 {
+  "autostart": {
+    "default_permission": {
+      "identifier": "default",
+      "description": "This permission set configures if your\napplication can enable or disable auto\nstarting the application on boot.\n\n#### Granted Permissions\n\nIt allows all to check, enable and\ndisable the automatic start on boot.\n\n",
+      "permissions": ["allow-enable", "allow-disable", "allow-is-enabled"]
+    },
+    "permissions": {
+      "allow-disable": {
+        "identifier": "allow-disable",
+        "description": "Enables the disable command without any pre-configured scope.",
+        "commands": { "allow": ["disable"], "deny": [] }
+      },
+      "allow-enable": {
+        "identifier": "allow-enable",
+        "description": "Enables the enable command without any pre-configured scope.",
+        "commands": { "allow": ["enable"], "deny": [] }
+      },
+      "allow-is-enabled": {
+        "identifier": "allow-is-enabled",
+        "description": "Enables the is_enabled command without any pre-configured scope.",
+        "commands": { "allow": ["is_enabled"], "deny": [] }
+      },
+      "deny-disable": {
+        "identifier": "deny-disable",
+        "description": "Denies the disable command without any pre-configured scope.",
+        "commands": { "allow": [], "deny": ["disable"] }
+      },
+      "deny-enable": {
+        "identifier": "deny-enable",
+        "description": "Denies the enable command without any pre-configured scope.",
+        "commands": { "allow": [], "deny": ["enable"] }
+      },
+      "deny-is-enabled": {
+        "identifier": "deny-is-enabled",
+        "description": "Denies the is_enabled command without any pre-configured scope.",
+        "commands": { "allow": [], "deny": ["is_enabled"] }
+      }
+    },
+    "permission_sets": {},
+    "global_scope_schema": null
+  },
   "clipboard-manager": {
     "default_permission": {
       "identifier": "default",
@@ -1908,6 +1949,67 @@
         "identifier": "deny-unminimize",
         "description": "Denies the unminimize command without any pre-configured scope.",
         "commands": { "allow": [], "deny": ["unminimize"] }
+      }
+    },
+    "permission_sets": {},
+    "global_scope_schema": null
+  },
+  "global-shortcut": {
+    "default_permission": {
+      "identifier": "default",
+      "description": "No features are enabled by default, as we believe\nthe shortcuts can be inherently dangerous and it is\napplication specific if specific shortcuts should be\nregistered or unregistered.\n",
+      "permissions": []
+    },
+    "permissions": {
+      "allow-is-registered": {
+        "identifier": "allow-is-registered",
+        "description": "Enables the is_registered command without any pre-configured scope.",
+        "commands": { "allow": ["is_registered"], "deny": [] }
+      },
+      "allow-register": {
+        "identifier": "allow-register",
+        "description": "Enables the register command without any pre-configured scope.",
+        "commands": { "allow": ["register"], "deny": [] }
+      },
+      "allow-register-all": {
+        "identifier": "allow-register-all",
+        "description": "Enables the register_all command without any pre-configured scope.",
+        "commands": { "allow": ["register_all"], "deny": [] }
+      },
+      "allow-unregister": {
+        "identifier": "allow-unregister",
+        "description": "Enables the unregister command without any pre-configured scope.",
+        "commands": { "allow": ["unregister"], "deny": [] }
+      },
+      "allow-unregister-all": {
+        "identifier": "allow-unregister-all",
+        "description": "Enables the unregister_all command without any pre-configured scope.",
+        "commands": { "allow": ["unregister_all"], "deny": [] }
+      },
+      "deny-is-registered": {
+        "identifier": "deny-is-registered",
+        "description": "Denies the is_registered command without any pre-configured scope.",
+        "commands": { "allow": [], "deny": ["is_registered"] }
+      },
+      "deny-register": {
+        "identifier": "deny-register",
+        "description": "Denies the register command without any pre-configured scope.",
+        "commands": { "allow": [], "deny": ["register"] }
+      },
+      "deny-register-all": {
+        "identifier": "deny-register-all",
+        "description": "Denies the register_all command without any pre-configured scope.",
+        "commands": { "allow": [], "deny": ["register_all"] }
+      },
+      "deny-unregister": {
+        "identifier": "deny-unregister",
+        "description": "Denies the unregister command without any pre-configured scope.",
+        "commands": { "allow": [], "deny": ["unregister"] }
+      },
+      "deny-unregister-all": {
+        "identifier": "deny-unregister-all",
+        "description": "Denies the unregister_all command without any pre-configured scope.",
+        "commands": { "allow": [], "deny": ["unregister_all"] }
       }
     },
     "permission_sets": {},
