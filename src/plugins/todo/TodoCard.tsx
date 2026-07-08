@@ -68,6 +68,7 @@ export function TodoCard({ manifest, expanded }: PluginComponentProps) {
   const [deadlineValue, setDeadlineValue] = useState('')
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const datePickerRef = useRef<HTMLInputElement>(null)
 
   // 折叠态显示的第一条待办（取截止时间最早的未完成项）
   // 使用 useMemo 避免每次渲染都重新排序
@@ -124,6 +125,7 @@ export function TodoCard({ manifest, expanded }: PluginComponentProps) {
             deadlineValue={deadlineValue}
             setDeadlineValue={setDeadlineValue}
             inputRef={inputRef}
+            datePickerRef={datePickerRef}
             hoveredId={hoveredId}
             setHoveredId={setHoveredId}
             onAdd={handleAdd}
@@ -204,6 +206,7 @@ interface ExpandedViewProps {
   deadlineValue: string
   setDeadlineValue: (v: string) => void
   inputRef: React.RefObject<HTMLInputElement | null>
+  datePickerRef: React.RefObject<HTMLInputElement | null>
   hoveredId: string | null
   setHoveredId: (id: string | null) => void
   onAdd: () => void
@@ -223,6 +226,7 @@ function ExpandedView({
   deadlineValue,
   setDeadlineValue,
   inputRef,
+  datePickerRef,
   hoveredId,
   setHoveredId,
   onAdd,
@@ -282,14 +286,34 @@ function ExpandedView({
         >
           <Calendar size={14} color="var(--text-muted)" />
           <input
-            type="date"
+            type="text"
             value={deadlineValue}
+            placeholder="YYYY-MM-DD 或 7月8日"
             onChange={(e) => setDeadlineValue(e.target.value)}
             onKeyDown={onKeyDown}
             className="flex-1 bg-transparent text-[12px] outline-none"
             style={{ color: 'var(--text-primary)', fontFamily: 'Inter' }}
             onClick={(e) => e.stopPropagation()}
           />
+          <input
+            type="date"
+            ref={datePickerRef}
+            onChange={(e) => {
+              if (e.target.value) {
+                setDeadlineValue(e.target.value)
+              }
+            }}
+            style={{ display: 'none' }}
+          />
+          <button
+            className="p-1 rounded hover:bg-bg-surface-hover transition-colors shrink-0"
+            onClick={(e) => {
+              e.stopPropagation()
+              datePickerRef.current?.showPicker()
+            }}
+          >
+            <Calendar size={14} color="var(--text-muted)" />
+          </button>
         </div>
       </div>
 
