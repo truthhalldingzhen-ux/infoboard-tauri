@@ -16,7 +16,12 @@ use types::*;
 const OPENCODE_URL: &str = "https://opencode.ai/workspace/wrk_01KTZNFM9S42BYDED8M1A393D4/go";
 const TIMEOUT_SECS: u64 = 15;
 
-const MINIMAX_API_KEY: &str = "sk-cp-REMOVED";
+/// 回退硬编码 Key（仅当环境变量未设置时使用，建议在 MiniMax 后台轮换此值）
+const MINIMAX_API_KEY_FALLBACK: &str = "sk-cp-REMOVED";
+
+fn get_minimax_api_key() -> String {
+    std::env::var("MINIMAX_API_KEY").unwrap_or_else(|_| MINIMAX_API_KEY_FALLBACK.to_string())
+}
 const MINIMAX_API_URL: &str = "https://www.minimaxi.com/v1/token_plan/remains";
 const MINIMAX_TIMEOUT_SECS: u64 = 10;
 
@@ -241,7 +246,7 @@ pub async fn opencode_get_minimax() -> Result<MiniMaxUsage, String> {
 
     let resp = client
         .get(MINIMAX_API_URL)
-        .header("Authorization", format!("Bearer {MINIMAX_API_KEY}"))
+        .header("Authorization", format!("Bearer {}", get_minimax_api_key()))
         .header("Content-Type", "application/json")
         .send()
         .await
