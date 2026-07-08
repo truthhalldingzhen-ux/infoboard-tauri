@@ -1,3 +1,6 @@
+use tauri::Manager;
+use tauri_plugin_window_state::{WindowExt, StateFlags};
+
 mod core {
     pub mod toast;
     pub mod tray;
@@ -17,8 +20,13 @@ fn greet(name: &str) -> String {
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_window_state::Builder::new().build())
         .setup(|app| {
             core::tray::setup_tray(app.handle())?;
+            // 恢复上次关闭时的窗口大小和位置
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.restore_state(StateFlags::all());
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
