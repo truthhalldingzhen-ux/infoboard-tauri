@@ -1,4 +1,75 @@
 {
+  "clipboard-manager": {
+    "default_permission": {
+      "identifier": "default",
+      "description": "No features are enabled by default, as we believe\nthe clipboard can be inherently dangerous and it is \napplication specific if read and/or write access is needed.\n\nClipboard interaction needs to be explicitly enabled.\n",
+      "permissions": []
+    },
+    "permissions": {
+      "allow-clear": {
+        "identifier": "allow-clear",
+        "description": "Enables the clear command without any pre-configured scope.",
+        "commands": { "allow": ["clear"], "deny": [] }
+      },
+      "allow-read-image": {
+        "identifier": "allow-read-image",
+        "description": "Enables the read_image command without any pre-configured scope.",
+        "commands": { "allow": ["read_image"], "deny": [] }
+      },
+      "allow-read-text": {
+        "identifier": "allow-read-text",
+        "description": "Enables the read_text command without any pre-configured scope.",
+        "commands": { "allow": ["read_text"], "deny": [] }
+      },
+      "allow-write-html": {
+        "identifier": "allow-write-html",
+        "description": "Enables the write_html command without any pre-configured scope.",
+        "commands": { "allow": ["write_html"], "deny": [] }
+      },
+      "allow-write-image": {
+        "identifier": "allow-write-image",
+        "description": "Enables the write_image command without any pre-configured scope.",
+        "commands": { "allow": ["write_image"], "deny": [] }
+      },
+      "allow-write-text": {
+        "identifier": "allow-write-text",
+        "description": "Enables the write_text command without any pre-configured scope.",
+        "commands": { "allow": ["write_text"], "deny": [] }
+      },
+      "deny-clear": {
+        "identifier": "deny-clear",
+        "description": "Denies the clear command without any pre-configured scope.",
+        "commands": { "allow": [], "deny": ["clear"] }
+      },
+      "deny-read-image": {
+        "identifier": "deny-read-image",
+        "description": "Denies the read_image command without any pre-configured scope.",
+        "commands": { "allow": [], "deny": ["read_image"] }
+      },
+      "deny-read-text": {
+        "identifier": "deny-read-text",
+        "description": "Denies the read_text command without any pre-configured scope.",
+        "commands": { "allow": [], "deny": ["read_text"] }
+      },
+      "deny-write-html": {
+        "identifier": "deny-write-html",
+        "description": "Denies the write_html command without any pre-configured scope.",
+        "commands": { "allow": [], "deny": ["write_html"] }
+      },
+      "deny-write-image": {
+        "identifier": "deny-write-image",
+        "description": "Denies the write_image command without any pre-configured scope.",
+        "commands": { "allow": [], "deny": ["write_image"] }
+      },
+      "deny-write-text": {
+        "identifier": "deny-write-text",
+        "description": "Denies the write_text command without any pre-configured scope.",
+        "commands": { "allow": [], "deny": ["write_text"] }
+      }
+    },
+    "permission_sets": {},
+    "global_scope_schema": null
+  },
   "core": {
     "default_permission": {
       "identifier": "default",

@@ -161,11 +161,12 @@ export function DynamicIsland({ manifest, expanded }: PluginComponentProps) {
     return 'idle'
   }, [currentMedia, unreadCount])
 
-  // 有内容时通知 InfoSection 显示灵动岛，空闲时隐藏
-  const hasContent = pillState !== 'idle'
+  // 有内容时通知 InfoSection 显示灵动岛，空闲时隐藏（开发模式下始终可见以便调试）
+  const isDev = import.meta.env.DEV
+  const hasContent = isDev || pillState !== 'idle'
   useEffect(() => {
     eventBus.emit('island:visibility', { visible: hasContent }, 'dynamic-island')
-  }, [hasContent])
+  }, [hasContent, isDev])
 
   // 获取最新通知（用于收缩态显示摘要）
   const latestNotification = useMemo(
@@ -174,8 +175,6 @@ export function DynamicIsland({ manifest, expanded }: PluginComponentProps) {
   )
 
   // ─── Mock 数据方法（仅开发环境） ───
-
-  const isDev = process.env.NODE_ENV === 'development'
 
   const loadMockMedia = useCallback(() => {
     setMockMedia(MOCK_MEDIA)

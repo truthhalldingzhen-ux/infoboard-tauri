@@ -2,11 +2,13 @@
  * 媒体控制 Hook
  *
  * 提供媒体会话状态和控制方法
- * 自动监听 SMTC 会话变化，实时更新状态
+ * 自动轮询 SMTC 会话变化（每 2 秒），实时更新状态
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type { MediaSession, PlaybackStatus } from './types'
+import { getCurrentSession, sendCommand as bridgeSendCommand } from './bridge'
+import { enrichMedia } from '../bilibili-info/bridge'
 
 /** B站信息缓存：title → enriched data */
 const bilibiliCache = new Map<
@@ -36,8 +38,7 @@ interface UseMediaControlReturn {
 /**
  * 媒体控制 Hook
  *
- * 通过轮询 SMTC 会话状态（每 2 秒）
- * 使用已验证可用的 getCurrentSession IPC 调用
+ * 通过 Tauri invoke 轮询 SMTC 会话状态（每 2 秒）
  */
 export function useMediaControl(): UseMediaControlReturn {
   const [currentMedia, setCurrentMedia] = useState<MediaSession | null>(null)
@@ -47,19 +48,10 @@ export function useMediaControl(): UseMediaControlReturn {
   /** 保存 sendCommand 中 setTimeout 的引用，用于卸载时清理 */
   const commandTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const isAPIAvailable = useCallback(() => {
-    return typeof window !== 'undefined' && window.mediaControl != null
-  }, [])
-
   const fetchSession = useCallback(async () => {
-    if (!isAPIAvailable()) {
-      setIsLoading(false)
-      return
-    }
-
     try {
       setError(null)
-      const session = await window.mediaControl.getCurrentSession()
+      const session = await getCurrentSession()
 
       // 检测B站来源，自动补充封面和UP主信息
       if (session && isBilibiliSource(session.sourceAppId) && session.title) {
@@ -74,20 +66,15 @@ export function useMediaControl(): UseMediaControlReturn {
     } finally {
       setIsLoading(false)
     }
-  }, [isAPIAvailable])
+  }, [])
 
   /**
    * 发送播放控制命令
    */
   const sendCommand = useCallback(
     async (command: 'play' | 'pause' | 'toggle' | 'next' | 'previous') => {
-      if (!isAPIAvailable()) {
-        console.warn('[useMediaControl] mediaControl API 不可用')
-        return false
-      }
-
       try {
-        const success = await window.mediaControl.sendCommand(command)
+        const success = await bridgeSendCommand(command)
 
         // 命令发送后延迟刷新状态（等待 SMTC 更新）
         if (success) {
@@ -107,7 +94,7 @@ export function useMediaControl(): UseMediaControlReturn {
         return false
       }
     },
-    [isAPIAvailable, fetchSession]
+    [fetchSession]
   )
 
   const refresh = useCallback(async () => {
@@ -119,12 +106,6 @@ export function useMediaControl(): UseMediaControlReturn {
    * 初始化：立即获取 + 每 2 秒轮询
    */
   useEffect(() => {
-    if (!isAPIAvailable()) {
-      console.warn('[useMediaControl] mediaControl API 不可用，跳过初始化')
-      setIsLoading(false)
-      return
-    }
-
     let unmounted = false
 
     // 立即获取一次
@@ -142,7 +123,7 @@ export function useMediaControl(): UseMediaControlReturn {
       }
       clearInterval(timer)
     }
-  }, [isAPIAvailable, fetchSession])
+  }, [fetchSession])
 
   return {
     currentMedia,
@@ -174,7 +155,7 @@ export function formatPlaybackStatus(status: PlaybackStatus): string {
 // ─── B站信息补充 ───
 
 /** 判断是否为B站来源 */
-function isBilibiliSource(sourceAppId: string): boolean {
+function isBilibiliSource(sourceAppId?: string): boolean {
   if (!sourceAppId) return false
   const lower = sourceAppId.toLowerCase()
   return lower.includes('bilibili') || lower.includes('哔哩哔哩')
@@ -195,11 +176,9 @@ async function enrichBilibiliSession(session: MediaSession): Promise<MediaSessio
     }
   }
 
-  // 调用主进程 API 获取B站视频信息
+  // 调用 Tauri invoke 获取B站视频信息
   try {
-    if (!window.bilibiliInfoAPI) return session
-
-    const info = await window.bilibiliInfoAPI.enrichMedia(title)
+    const info = await enrichMedia(title)
     if (!info) return session
 
     // 写入缓存

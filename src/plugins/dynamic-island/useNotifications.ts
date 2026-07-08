@@ -9,6 +9,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type { NotificationItem } from './types'
+import { writeText } from '../../core/clipboard-bridge'
 
 /** 全量刷新间隔（毫秒） */
 const FULL_REFRESH_INTERVAL = 30_000
@@ -48,14 +49,23 @@ export function useNotifications(): UseNotificationsReturn {
 
     try {
       const mails = await window.mailControl.fetchRecent(5)
-      const items: NotificationItem[] = mails.map((mail) => ({
-        id: `mail::${mail.account}::${mail.uid}`,
-        type: 'email' as const,
-        title: mail.sender,
-        body: mail.subject,
-        timestamp: mail.date,
-        read: mail.seen,
-      }))
+      const items: NotificationItem[] = mails.map(
+        (mail: {
+          account: string
+          uid: number
+          sender: string
+          subject: string
+          date: number
+          seen: boolean
+        }) => ({
+          id: `mail::${mail.account}::${mail.uid}`,
+          type: 'email' as const,
+          title: mail.sender,
+          body: mail.subject,
+          timestamp: mail.date,
+          read: mail.seen,
+        })
+      )
 
       // 合并本地已读状态，同时保留 doCheckNew 添加但服务器尚未返回的新条目
       setNotifications((prev) => {
@@ -93,14 +103,23 @@ export function useNotifications(): UseNotificationsReturn {
       if (result.newMails.length === 0) return
 
       // 追加新邮件到列表
-      const newItems: NotificationItem[] = result.newMails.map((mail) => ({
-        id: `mail::${mail.account}::${mail.uid}`,
-        type: 'email' as const,
-        title: mail.sender,
-        body: mail.subject,
-        timestamp: mail.date,
-        read: mail.seen,
-      }))
+      const newItems: NotificationItem[] = result.newMails.map(
+        (mail: {
+          account: string
+          uid: number
+          sender: string
+          subject: string
+          date: number
+          seen: boolean
+        }) => ({
+          id: `mail::${mail.account}::${mail.uid}`,
+          type: 'email' as const,
+          title: mail.sender,
+          body: mail.subject,
+          timestamp: mail.date,
+          read: mail.seen,
+        })
+      )
 
       setNotifications((prev) => {
         const existingIds = new Set(prev.map((n) => n.id))
@@ -109,16 +128,21 @@ export function useNotifications(): UseNotificationsReturn {
         return [...fresh, ...prev]
       })
 
-      // 主进程已复制验证码，只需显示 toast
+      // 复制验证码到剪贴板
       if (result.code) {
-        if (window.toastAPI) {
-          window.toastAPI.show({
-            message: `📋 验证码已复制: ${result.code}`,
-            color: '#4ADE80',
-            bg: '#2D6A3D',
-            duration: 4000,
+        await writeText(result.code)
+
+        // 通过事件总线显示 toast
+        window.dispatchEvent(
+          new CustomEvent('toast-show', {
+            detail: {
+              message: `📋 验证码已复制: ${result.code}`,
+              color: '#4ADE80',
+              bg: '#2D6A3D',
+              duration: 4000,
+            },
           })
-        }
+        )
       }
     } catch (err) {
       console.error('[useNotifications] 快检失败:', err)

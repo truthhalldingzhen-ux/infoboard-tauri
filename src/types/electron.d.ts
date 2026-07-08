@@ -48,6 +48,9 @@ declare global {
     niutransAPI?: any
     clipboard?: any
     toastAPI: ToastAPI
+    mailControl: any
+    mediaControl: any
+    bilibiliInfoAPI: any
   }
 }
 
