@@ -28,3 +28,17 @@ tokio = { version = "1", features = ["full"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-global-shortcut = "2"
 md-5 = "0.10"
+
+# Issue 14: 截图插件
+image = "0.25"
+arboard = "3"
+base64 = "0.22"
+
+# Issue 15: OCR 插件（使用子进程通信，无需额外 crate）
+
+# Issue 16: IMAP 邮件插件
+imap = "2.4"
+native-tls = "0.2"
+mail-parser = "0.10"
+html-escape = "0.2"
+log = "0.4"

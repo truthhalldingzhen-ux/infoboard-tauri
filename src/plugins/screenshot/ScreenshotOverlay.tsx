@@ -2,15 +2,15 @@
  * 截图覆盖层组件
  *
  * 工作流程：
- * 1. Rust 后端捕获桌面截图并传递给此组件
- * 2. 显示截屏图片 + 半透明遮罩
- * 3. 用户框选区域 → 选区内显示原图（无遮罩）
- * 4. 确认 → 从原始截屏中裁剪写入剪贴板
- *
- * 注意：截图功能暂未实现，此 UI 组件保留供后续集成
+ * 1. 挂载时调用后端 PowerShell 截全屏 → 显示覆盖层
+ * 2. 用户框选区域 → 选区内显示原图（无遮罩）
+ * 3. 确认 → Canvas 裁剪选区 → 写入系统剪贴板
+ * 4. 可选：识别文字（OCR）
  */
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
+import * as screenshotBridge from './bridge'
+import * as ocrBridge from './ocr-bridge'
 
 interface SelectionRect {
   x: number
@@ -19,14 +19,22 @@ interface SelectionRect {
   height: number
 }
 
-type OverlayState = 'idle' | 'selecting' | 'selected'
+type OverlayState = 'loading' | 'idle' | 'selecting' | 'selected'
 
-export function ScreenshotOverlay() {
+interface ScreenshotOverlayProps {
+  onClose: () => void
+}
+
+export function ScreenshotOverlay({ onClose }: ScreenshotOverlayProps) {
   const [screenImage, setScreenImage] = useState<string | null>(null)
-  const [state, setState] = useState<OverlayState>('idle')
+  const [state, setState] = useState<OverlayState>('loading')
   const [startPos, setStartPos] = useState({ x: 0, y: 0 })
   const [currentPos, setCurrentPos] = useState({ x: 0, y: 0 })
   const [selection, setSelection] = useState<SelectionRect | null>(null)
+  const [ocrText, setOcrText] = useState<string | null>(null)
+  const [ocrLoading, setOcrLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const imgRef = useRef<HTMLImageElement | null>(null)
 
   const calcRect = useCallback(
     (sx: number, sy: number, ex: number, ey: number): SelectionRect => ({
@@ -38,9 +46,13 @@ export function ScreenshotOverlay() {
     []
   )
 
+  // 取消
   const handleCancel = useCallback(() => {
-    window.electronAPI?.cancelScreenshot?.()
-  }, [])
+    screenshotBridge.cancelScreenshot().catch(() => {})
+    setOcrText(null)
+    setError(null)
+    onClose()
+  }, [onClose])
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
@@ -48,9 +60,12 @@ export function ScreenshotOverlay() {
         handleCancel()
         return
       }
-      if (state === 'selected' || state !== 'idle') return
+      if (state === 'selected') return // 已选中的情况下不允许重新选择（必须取消或确认）
+      if (state !== 'idle') return
       setStartPos({ x: e.clientX, y: e.clientY })
       setCurrentPos({ x: e.clientX, y: e.clientY })
+      setOcrText(null)
+      setError(null)
       setState('selecting')
     },
     [state, handleCancel]
@@ -75,9 +90,13 @@ export function ScreenshotOverlay() {
     setState('selected')
   }, [state, startPos, currentPos, calcRect])
 
+  // 键盘事件处理
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') handleCancel()
+      if (e.key === 'Enter' && state === 'selected') {
+        handleWriteClipboard()
+      }
     }
     const ctx = (e: MouseEvent) => {
       e.preventDefault()
@@ -89,21 +108,158 @@ export function ScreenshotOverlay() {
       window.removeEventListener('keydown', handler)
       window.removeEventListener('contextmenu', ctx)
     }
-  }, [handleCancel])
+  }, [handleCancel, state])
 
+  // 挂载时截图
   useEffect(() => {
-    window.electronAPI?.onScreenData?.((dataUrl: string) => setScreenImage(dataUrl))
+    let cancelled = false
+
+    const loadScreenshot = async () => {
+      try {
+        const dataUrl = await screenshotBridge.capture()
+        if (!cancelled) {
+          setScreenImage(dataUrl)
+          setState('idle')
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(String(err))
+          setState('idle')
+        }
+      }
+    }
+
+    loadScreenshot()
+
+    return () => {
+      cancelled = true
+    }
   }, [])
 
-  const handleConfirm = useCallback(async () => {
+  // 裁剪选区并写入剪贴板
+  const handleWriteClipboard = useCallback(async () => {
     if (!selection || !screenImage) return
+
     try {
-      if (window.electronAPI?.confirmScreenshot) {
-        // 裁剪逻辑待实现
-        window.electronAPI.confirmScreenshot(screenImage)
+      const img = new Image()
+      img.src = screenImage
+
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve()
+        img.onerror = () => reject(new Error('图片加载失败'))
+      })
+
+      // 🔴 计算缩放比例：截图以 object-fill 显示在窗口中，窗口坐标 ≠ 图像像素坐标
+      const imgEl = imgRef.current
+      if (!imgEl) throw new Error('图片元素未挂载')
+      const scaleX = img.naturalWidth / imgEl.clientWidth
+      const scaleY = img.naturalHeight / imgEl.clientHeight
+
+      // Canvas 裁剪
+      const canvas = document.createElement('canvas')
+      const sx = Math.round(selection.x * scaleX)
+      const sy = Math.round(selection.y * scaleY)
+      const sw = Math.round(selection.width * scaleX)
+      const sh = Math.round(selection.height * scaleY)
+      canvas.width = sw
+      canvas.height = sh
+      const ctx = canvas.getContext('2d')
+      if (!ctx) throw new Error('无法创建 Canvas 上下文')
+
+      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh)
+
+      // 获取裁剪后的 Blob
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'))
+      if (!blob) throw new Error('Canvas 导出失败')
+
+      // 先尝试用 navigator.clipboard.write()（浏览器 API）
+      try {
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            'image/png': blob,
+          }),
+        ])
+        console.log('[截图] 图片已写入剪贴板')
+      } catch {
+        // 降级：通过后端写入剪贴板
+        const dataUrl = canvas.toDataURL('image/png')
+        await screenshotBridge.confirmScreenshot(dataUrl)
+        console.log('[截图] 通过后端写入剪贴板')
+      }
+
+      onClose()
+    } catch (err) {
+      console.error('[截图] 写入剪贴板失败:', err)
+      setError(String(err))
+    }
+  }, [selection, screenImage, onClose])
+
+  // OCR 识别
+  const handleOcr = useCallback(async () => {
+    if (!selection || !screenImage) return
+
+    setOcrLoading(true)
+    setOcrText(null)
+    setError(null)
+
+    try {
+      const img = new Image()
+      img.src = screenImage
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve()
+        img.onerror = () => reject(new Error('图片加载失败'))
+      })
+
+      // 计算缩放比例（与 handleWriteClipboard 逻辑一致）
+      const imgEl = imgRef.current
+      if (!imgEl) throw new Error('图片元素未挂载')
+      const scaleX = img.naturalWidth / imgEl.clientWidth
+      const scaleY = img.naturalHeight / imgEl.clientHeight
+
+      // 裁剪选区
+      const canvas = document.createElement('canvas')
+      const sx = Math.round(selection.x * scaleX)
+      const sy = Math.round(selection.y * scaleY)
+      const sw = Math.round(selection.width * scaleX)
+      const sh = Math.round(selection.height * scaleY)
+      canvas.width = sw
+      canvas.height = sh
+      const ctx = canvas.getContext('2d')
+      if (!ctx) throw new Error('无法创建 Canvas 上下文')
+
+      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh)
+
+      // 转为 base64（去掉 data URL 前缀）
+      const dataUrl = canvas.toDataURL('image/png')
+      const base64 = dataUrl.split(',')[1] || ''
+
+      // 调用 OCR
+      const response = await ocrBridge.recognize(base64)
+
+      if (response.code === 100 && Array.isArray(response.data)) {
+        const results: { text: string; score: number }[] = response.data.map((item: unknown) => {
+          const obj = item as { text?: string; score?: number }
+          return {
+            text: obj.text ?? '',
+            score: obj.score ?? 0,
+          }
+        })
+
+        if (results.length === 0) {
+          setOcrText('未识别到文字')
+        } else {
+          const combined = results.map((r) => r.text).join('\n')
+          setOcrText(combined)
+        }
+      } else {
+        const errMsg =
+          typeof response.data === 'string' ? response.data : `OCR 错误 (code=${response.code})`
+        setError(errMsg)
       }
     } catch (err) {
-      console.error('[截图] 失败:', err)
+      setError(String(err))
+    } finally {
+      setOcrLoading(false)
     }
   }, [selection, screenImage])
 
@@ -114,106 +270,127 @@ export function ScreenshotOverlay() {
     const offset = 8
     let x = rect.x
     let y = rect.y + rect.height + offset
-    if (y + 40 > window.innerHeight) y = rect.y - 40 - offset
+    if (y + 80 > window.innerHeight) y = rect.y - 80 - offset
     return { left: x, top: y }
   }
 
   return (
     <div
-      className="fixed inset-0 z-50"
-      style={{ cursor: 'crosshair' }}
-      onMouseDown={handleMouseDown}
+      className="fixed inset-0 z-50 select-none"
+      style={{ cursor: state === 'idle' || state === 'selecting' ? 'crosshair' : 'default' }}
+      onMouseDown={state === 'idle' ? handleMouseDown : undefined}
       onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
+      onMouseUp={state === 'selecting' ? handleMouseUp : undefined}
     >
+      {/* 截图背景 */}
       {screenImage && (
-        <img
-          src={screenImage}
-          alt=""
-          className="absolute inset-0 w-full h-full object-fill pointer-events-none select-none"
-          draggable={false}
-        />
+        <>
+          <img
+            ref={imgRef}
+            src={screenImage}
+            alt=""
+            className="absolute inset-0 w-full h-full object-fill pointer-events-none select-none"
+            draggable={false}
+          />
+          {/* 暗色遮罩 → 选区位置恢复原图 */}
+          {currentRect && currentRect.width > 0 && currentRect.height > 0 ? (
+            <>
+              <div
+                className="absolute left-0 top-0 right-0 pointer-events-none"
+                style={{ height: currentRect.y, background: 'rgba(0,0,0,0.45)' }}
+              />
+              <div
+                className="absolute left-0 right-0 bottom-0 pointer-events-none"
+                style={{
+                  top: currentRect.y + currentRect.height,
+                  background: 'rgba(0,0,0,0.45)',
+                }}
+              />
+              <div
+                className="absolute pointer-events-none"
+                style={{
+                  left: 0,
+                  top: currentRect.y,
+                  width: currentRect.x,
+                  height: currentRect.height,
+                  background: 'rgba(0,0,0,0.45)',
+                }}
+              />
+              <div
+                className="absolute pointer-events-none"
+                style={{
+                  left: currentRect.x + currentRect.width,
+                  top: currentRect.y,
+                  right: 0,
+                  height: currentRect.height,
+                  background: 'rgba(0,0,0,0.45)',
+                }}
+              />
+            </>
+          ) : (
+            <div
+              className="absolute inset-0 pointer-events-none"
+              style={{ background: 'rgba(0,0,0,0.08)' }}
+            />
+          )}
+        </>
       )}
-      {!screenImage && (
-        <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
-          <span className="text-white text-sm">正在截取屏幕...</span>
+
+      {/* 加载状态 */}
+      {!screenImage && !error && (
+        <div className="absolute inset-0 flex items-center justify-center bg-gray-900/80">
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-8 h-8 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            <span className="text-white text-sm">正在截取屏幕...</span>
+          </div>
         </div>
       )}
-      {screenImage && currentRect && currentRect.width > 0 && currentRect.height > 0 && (
-        <>
-          <div
-            className="absolute left-0 top-0 right-0"
-            style={{ height: currentRect.y, background: 'rgba(0,0,0,0.4)' }}
-          />
-          <div
-            className="absolute left-0 right-0 bottom-0"
-            style={{ top: currentRect.y + currentRect.height, background: 'rgba(0,0,0,0.4)' }}
-          />
-          <div
-            className="absolute"
-            style={{
-              left: 0,
-              top: currentRect.y,
-              width: currentRect.x,
-              height: currentRect.height,
-              background: 'rgba(0,0,0,0.4)',
-            }}
-          />
-          <div
-            className="absolute"
-            style={{
-              left: currentRect.x + currentRect.width,
-              top: currentRect.y,
-              right: 0,
-              height: currentRect.height,
-              background: 'rgba(0,0,0,0.4)',
-            }}
-          />
-        </>
-      )}
-      {screenImage && !currentRect && (
-        <div
-          className="absolute inset-0 pointer-events-none"
-          style={{ background: 'rgba(0,0,0,0.08)' }}
-        />
-      )}
-      {currentRect && currentRect.width > 0 && currentRect.height > 0 && (
-        <>
-          <div
-            className="absolute pointer-events-none"
-            style={{
-              left: currentRect.x,
-              top: currentRect.y,
-              width: currentRect.width,
-              height: currentRect.height,
-              border: '2px dashed var(--accent)',
-            }}
-          />
-          <div
-            className="absolute pointer-events-none"
-            style={{
-              left: currentRect.x,
-              top: currentRect.y - 28,
-              background: 'rgba(0,0,0,0.7)',
-              borderRadius: 4,
-              padding: '3px 8px',
-            }}
-          >
-            <span className="text-white text-xs font-mono">
-              {Math.round(currentRect.width)} × {Math.round(currentRect.height)}
-            </span>
+
+      {/* 错误状态 */}
+      {error && (
+        <div className="absolute inset-0 flex items-center justify-center bg-gray-900/80">
+          <div className="flex flex-col items-center gap-3">
+            <span className="text-red-400 text-sm">{error}</span>
+            <button
+              onClick={handleCancel}
+              className="px-4 py-1.5 text-xs font-medium text-white rounded-md bg-gray-600 hover:bg-gray-500"
+            >
+              关闭
+            </button>
           </div>
-        </>
+        </div>
       )}
+
+      {/* 选区尺寸标签 */}
+      {currentRect && currentRect.width > 0 && currentRect.height > 0 && (
+        <div
+          className="absolute pointer-events-none"
+          style={{
+            left: currentRect.x,
+            top: currentRect.y - 28,
+            background: 'rgba(0,0,0,0.7)',
+            borderRadius: 4,
+            padding: '3px 8px',
+          }}
+        >
+          <span className="text-white text-xs font-mono">
+            {Math.round(currentRect.width)} × {Math.round(currentRect.height)}
+          </span>
+        </div>
+      )}
+
+      {/* 已选中状态操作栏 */}
       {state === 'selected' && selection && (
         <div
-          className="absolute flex gap-2"
+          className="absolute flex gap-2 z-10"
           style={{
-            ...getActionBoxPosition(selection),
-            background: 'var(--bg-surface)',
+            left: getActionBoxPosition(selection).left,
+            top: getActionBoxPosition(selection).top,
+            background: 'rgba(30,30,30,0.92)',
             borderRadius: 8,
-            padding: 8,
-            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+            padding: '6px',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+            backdropFilter: 'blur(8px)',
           }}
         >
           <button
@@ -222,30 +399,76 @@ export function ScreenshotOverlay() {
               handleCancel()
             }}
             onMouseDown={(e) => e.stopPropagation()}
-            className="px-4 py-1.5 text-xs font-medium rounded-md hover:opacity-80"
-            style={{
-              background: 'transparent',
-              border: '1px solid var(--border-subtle)',
-              color: 'var(--text-muted)',
-            }}
+            className="px-3 py-1.5 text-xs font-medium rounded-md hover:bg-white/10 transition-colors"
+            style={{ color: 'rgba(255,255,255,0.7)' }}
           >
             取消
           </button>
           <button
             onClick={(e) => {
               e.stopPropagation()
-              handleConfirm()
+              handleOcr()
             }}
             onMouseDown={(e) => e.stopPropagation()}
-            className="px-4 py-1.5 text-xs font-medium text-white rounded-md hover:opacity-90"
-            style={{ background: 'var(--accent)' }}
+            disabled={ocrLoading}
+            className="px-3 py-1.5 text-xs font-medium rounded-md transition-colors"
+            style={{
+              color: ocrLoading ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.7)',
+              background: 'rgba(255,255,255,0.08)',
+            }}
           >
-            确认
+            {ocrLoading ? '识别中...' : '识别文字'}
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              handleWriteClipboard()
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+            className="px-3 py-1.5 text-xs font-medium text-white rounded-md transition-colors"
+            style={{ background: 'var(--accent, #3b82f6)' }}
+          >
+            确认 ✓
           </button>
         </div>
       )}
+
+      {/* OCR 结果展示 */}
+      {ocrText && (
+        <div
+          className="absolute bottom-16 left-1/2 -translate-x-1/2 z-10 max-w-md w-[90%]"
+          style={{
+            background: 'rgba(0,0,0,0.85)',
+            borderRadius: 8,
+            padding: '10px 14px',
+            backdropFilter: 'blur(8px)',
+          }}
+        >
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs text-green-400 font-medium">OCR 识别结果</span>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(ocrText).catch(() => {})
+                const event = new CustomEvent('toast-show', {
+                  detail: { message: '已复制识别结果' },
+                })
+                window.dispatchEvent(event)
+              }}
+              className="text-xs px-2 py-0.5 rounded hover:bg-white/10"
+              style={{ color: 'rgba(255,255,255,0.6)' }}
+            >
+              复制
+            </button>
+          </div>
+          <p className="text-sm text-white whitespace-pre-wrap break-all max-h-32 overflow-y-auto">
+            {ocrText}
+          </p>
+        </div>
+      )}
+
+      {/* 底部提示 */}
       <div
-        className="absolute flex items-center gap-1.5"
+        className="absolute flex items-center gap-1.5 pointer-events-none"
         style={{ left: '50%', bottom: 20, transform: 'translateX(-50%)' }}
       >
         <kbd

@@ -10,6 +10,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type { NotificationItem } from './types'
 import { writeText } from '../../core/clipboard-bridge'
+import * as mailBridge from './mail-bridge'
 
 /** 全量刷新间隔（毫秒） */
 const FULL_REFRESH_INTERVAL = 30_000
@@ -40,32 +41,26 @@ export function useNotifications(): UseNotificationsReturn {
   const notificationsRef = useRef(notifications)
   notificationsRef.current = notifications
 
+  /** 防止 doCheckNew 重叠执行 */
+  const checkingRef = useRef(false)
+
   /**
    * 拉取邮件并合并本地已读状态 + 自动提取验证码
    * 不依赖任何闭包中的 state，通过 ref 读取最新状态
    */
   const doFetchMails = useCallback(async () => {
-    if (!window.mailControl || !connectedRef.current) return
+    if (!connectedRef.current) return
 
     try {
-      const mails = await window.mailControl.fetchRecent(5)
-      const items: NotificationItem[] = mails.map(
-        (mail: {
-          account: string
-          uid: number
-          sender: string
-          subject: string
-          date: number
-          seen: boolean
-        }) => ({
-          id: `mail::${mail.account}::${mail.uid}`,
-          type: 'email' as const,
-          title: mail.sender,
-          body: mail.subject,
-          timestamp: mail.date,
-          read: mail.seen,
-        })
-      )
+      const mails = await mailBridge.fetchRecent(5)
+      const items: NotificationItem[] = mails.map((mail) => ({
+        id: `mail::${mail.account}::${mail.uid}`,
+        type: 'email' as const,
+        title: mail.sender,
+        body: mail.subject,
+        timestamp: mail.date,
+        read: mail.seen,
+      }))
 
       // 合并本地已读状态，同时保留 doCheckNew 添加但服务器尚未返回的新条目
       setNotifications((prev) => {
@@ -95,31 +90,23 @@ export function useNotifications(): UseNotificationsReturn {
    * 快检（每 1 秒）— 主进程已完成检测+拉取+提取+复制，这里只读结果
    */
   const doCheckNew = useCallback(async () => {
-    if (!window.mailControl || !connectedRef.current) return
+    if (checkingRef.current || !connectedRef.current) return
+    checkingRef.current = true
 
     try {
-      const result = await window.mailControl.checkNew()
+      const result = await mailBridge.checkNew()
 
       if (result.newMails.length === 0) return
 
       // 追加新邮件到列表
-      const newItems: NotificationItem[] = result.newMails.map(
-        (mail: {
-          account: string
-          uid: number
-          sender: string
-          subject: string
-          date: number
-          seen: boolean
-        }) => ({
-          id: `mail::${mail.account}::${mail.uid}`,
-          type: 'email' as const,
-          title: mail.sender,
-          body: mail.subject,
-          timestamp: mail.date,
-          read: mail.seen,
-        })
-      )
+      const newItems: NotificationItem[] = result.newMails.map((mail) => ({
+        id: `mail::${mail.account}::${mail.uid}`,
+        type: 'email' as const,
+        title: mail.sender,
+        body: mail.subject,
+        timestamp: mail.date,
+        read: mail.seen,
+      }))
 
       setNotifications((prev) => {
         const existingIds = new Set(prev.map((n) => n.id))
@@ -146,6 +133,8 @@ export function useNotifications(): UseNotificationsReturn {
       }
     } catch (err) {
       console.error('[useNotifications] 快检失败:', err)
+    } finally {
+      checkingRef.current = false
     }
   }, [])
 
@@ -162,9 +151,9 @@ export function useNotifications(): UseNotificationsReturn {
     setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)))
 
     // 同步到 IMAP
-    if (account && !isNaN(uid) && uid > 0 && window.mailControl) {
+    if (account && !isNaN(uid) && uid > 0) {
       try {
-        await window.mailControl.markRead([uid], account)
+        await mailBridge.markRead([uid], account)
       } catch (err) {
         console.error('[useNotifications] 标记已读同步失败:', err)
         // 不撤销本地乐观更新，下次全量刷新会同步服务器状态
@@ -202,9 +191,9 @@ export function useNotifications(): UseNotificationsReturn {
     if (!hasUnread) return
 
     for (const [account, uids] of accountUids) {
-      if (uids.length > 0 && window.mailControl) {
+      if (uids.length > 0) {
         try {
-          await window.mailControl.markRead(uids, account)
+          await mailBridge.markRead(uids, account)
         } catch (err) {
           console.error('[useNotifications] 全部已读同步失败:', err)
         }
@@ -216,9 +205,8 @@ export function useNotifications(): UseNotificationsReturn {
    * 获取邮件正文
    */
   const fetchContent = useCallback(async (uid: number, account: string): Promise<string | null> => {
-    if (!window.mailControl) return null
     try {
-      return await window.mailControl.fetchContent(uid, account)
+      return await mailBridge.fetchContent(uid, account)
     } catch (err) {
       console.error('[useNotifications] 获取邮件正文失败:', err)
       return null
@@ -241,19 +229,14 @@ export function useNotifications(): UseNotificationsReturn {
    * 初始化：连接 → 拉取 → 轮询（只在挂载时运行一次）
    */
   useEffect(() => {
-    if (!window.mailControl) {
-      setIsLoading(false)
-      return
-    }
-
     let fullRefreshTimer: ReturnType<typeof setInterval> | null = null
     let newCheckTimer: ReturnType<typeof setInterval> | null = null
     let unmounted = false
 
     const init = async () => {
       try {
-        // 从主进程 electron-store 读取已保存的凭据并连接
-        const result = await window.mailControl.connectSaved()
+        // 从 tauri-plugin-store 读取已保存的凭据并连接
+        const result = await mailBridge.connectSaved()
         if (unmounted) return
 
         if (!result.success) {
@@ -274,7 +257,7 @@ export function useNotifications(): UseNotificationsReturn {
         if (unmounted) return
         setIsLoading(false)
 
-        // 快检：每 1 秒检查 IDLE 缓冲区（轻量级 IPC，几乎无开销）
+        // 快检：每 1 秒检查
         newCheckTimer = setInterval(() => {
           doCheckNew()
         }, NEW_CHECK_INTERVAL)
@@ -298,9 +281,6 @@ export function useNotifications(): UseNotificationsReturn {
       if (fullRefreshTimer) clearInterval(fullRefreshTimer)
     }
   }, []) // 空依赖：只运行一次
-
-  // 连接在主进程管理，不在组件卸载时断开
-  // 应用退出时由 mailControlManager.destroy() 统一清理
 
   return {
     notifications,

@@ -13,9 +13,10 @@ mod plugins {
     pub mod media_control;
     pub mod niutrans;
     pub mod opencode;
+    pub mod screenshot;
+    pub mod ocr;
+    pub mod mail;
 }
-
-
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -63,6 +64,9 @@ pub fn run() {
                 use tauri_plugin_global_shortcut::GlobalShortcutExt;
                 let _ = app.global_shortcut().register("Ctrl+Shift+I");
             }
+            // 注册插件状态
+            app.manage(plugins::ocr::OcrEngine::new());
+            app.manage(plugins::mail::MailManager::new());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -88,6 +92,26 @@ pub fn run() {
             plugins::niutrans::niutrans_has_api_key,
             plugins::niutrans::niutrans_get_config,
             plugins::niutrans::niutrans_get_char_count,
+            // Issue 14: 截图
+            plugins::screenshot::screenshot_capture,
+            plugins::screenshot::screenshot_confirm,
+            plugins::screenshot::screenshot_cancel,
+            // Issue 15: OCR
+            plugins::ocr::ocr_recognize,
+            plugins::ocr::ocr_is_ready,
+            plugins::ocr::ocr_engine_status,
+            // Issue 16: IMAP 邮件
+            plugins::mail::mail_get_config,
+            plugins::mail::mail_set_config,
+            plugins::mail::mail_add_account,
+            plugins::mail::mail_remove_account,
+            plugins::mail::mail_connect_saved,
+            plugins::mail::mail_fetch_recent,
+            plugins::mail::mail_check_new,
+            plugins::mail::mail_fetch_content,
+            plugins::mail::mail_mark_read,
+            plugins::mail::mail_disconnect_all,
+            plugins::mail::mail_connection_info,
         ])
         .build(tauri::generate_context!())
         .expect("启动 InfoBoard 失败");
