@@ -119,6 +119,12 @@ function getApiConfig(): { host: string; key: string } {
     const stored = localStorage.getItem('infoboard-settings')
     if (stored) {
       const parsed = JSON.parse(stored)
+      console.log(
+        '[天气] 从 settings 读取: host=',
+        parsed.weatherApiHost || '(空)',
+        'key长度=',
+        (parsed.weatherApiKey || '').length
+      )
       return {
         host: parsed.weatherApiHost || QWEATHER_API_HOST,
         key: parsed.weatherApiKey || QWEATHER_API_KEY,
@@ -127,6 +133,12 @@ function getApiConfig(): { host: string; key: string } {
   } catch {
     /* 忽略 */
   }
+  console.log(
+    '[天气] 使用 config.ts 默认值: host=',
+    QWEATHER_API_HOST,
+    'key长度=',
+    QWEATHER_API_KEY.length
+  )
   return { host: QWEATHER_API_HOST, key: QWEATHER_API_KEY }
 }
 
@@ -232,14 +244,24 @@ function loadCityConfig(): CityInfo {
 export function useWeather(): UseWeatherReturn {
   const [cityConfig, setCityConfig] = useState(loadCityConfig)
 
+  console.log('[天气] useWeather 初始化, cityConfig:', JSON.stringify(cityConfig))
+
   const [data, setData] = useState<WeatherData | null>(() => {
     try {
       const cached = localStorage.getItem(CACHE_KEY)
-      if (!cached) return null
+      if (!cached) {
+        console.log('[天气] 无缓存数据')
+        return null
+      }
       const parsed = JSON.parse(cached)
       if (Date.now() - parsed.updatedAt < CACHE_DURATION) {
+        console.log(
+          '[天气] 使用缓存数据, 更新时间:',
+          new Date(parsed.updatedAt).toLocaleTimeString('zh-CN')
+        )
         return parsed
       }
+      console.log('[天气] 缓存已过期')
       return null
     } catch {
       return null
@@ -273,11 +295,17 @@ export function useWeather(): UseWeatherReturn {
   const fetchWeather = useCallback(
     async (config?: CityInfo) => {
       const city = config || cityConfig
+      const { host, key } = getApiConfig()
       const locationParam = getLocationParam(city)
       const cityName = city.name
 
+      console.log('[天气] ========== fetchWeather 开始 ==========')
+      console.log('[天气] 城市:', cityName, 'locationParam:', locationParam)
+      console.log('[天气] API 配置: host=', host, 'key 长度=', key?.length || 0)
+
       // 离线时跳过请求
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        console.log('[天气] 检测到离线状态，跳过请求')
         setIsOffline(true)
         if (!dataRef.current) {
           try {
@@ -303,18 +331,43 @@ export function useWeather(): UseWeatherReturn {
       setError(null)
 
       try {
+        console.log('[天气] 并行发起 3 个 API 请求...')
         // 并行请求实时天气、3 天预报；逐时预报在付费版才有，单独处理
+        const urls = [
+          buildUrl('/v7/weather/now', locationParam),
+          buildUrl('/v7/weather/3d', locationParam),
+          buildUrl('/v7/weather/24h', locationParam),
+        ]
+        console.log('[天气] now URL:', urls[0].replace(key, '***'))
+        console.log('[天气] 3d URL:', urls[1].replace(key, '***'))
+
         const [nowRes, dailyRes, hourlyRes] = await Promise.allSettled([
-          fetch(buildUrl('/v7/weather/now', locationParam), {
+          fetch(urls[0], {
             signal: controller.signal,
           }),
-          fetch(buildUrl('/v7/weather/3d', locationParam), {
+          fetch(urls[1], {
             signal: controller.signal,
           }),
-          fetch(buildUrl('/v7/weather/24h', locationParam), {
+          fetch(urls[2], {
             signal: controller.signal,
           }),
         ])
+
+        console.log(
+          '[天气] now 状态:',
+          nowRes.status,
+          nowRes.status === 'fulfilled' ? nowRes.value.status : 'fetch_failed'
+        )
+        console.log(
+          '[天气] daily 状态:',
+          dailyRes.status,
+          dailyRes.status === 'fulfilled' ? dailyRes.value.status : 'fetch_failed'
+        )
+        console.log(
+          '[天气] hourly 状态:',
+          hourlyRes.status,
+          hourlyRes.status === 'fulfilled' ? hourlyRes.value.status : 'fetch_failed'
+        )
 
         if (nowRes.status !== 'fulfilled' || !nowRes.value.ok) {
           const code = nowRes.status === 'fulfilled' ? nowRes.value.status : 0
@@ -327,6 +380,18 @@ export function useWeather(): UseWeatherReturn {
 
         const nowData: QWeatherNowResponse = await nowRes.value.json()
         const dailyData: QWeatherDailyResponse = await dailyRes.value.json()
+        console.log(
+          '[天气] nowData.code:',
+          nowData.code,
+          'nowData.now:',
+          JSON.stringify(nowData.now).slice(0, 120)
+        )
+        console.log(
+          '[天气] dailyData.code:',
+          dailyData.code,
+          'dailyData.daily 条数:',
+          dailyData.daily?.length
+        )
         let hourlyData: QWeatherHourlyResponse | null = null
 
         if (hourlyRes.status === 'fulfilled' && hourlyRes.value.ok) {
@@ -354,18 +419,27 @@ export function useWeather(): UseWeatherReturn {
 
         // 转换数据
         const weatherData = transformWeatherData(nowData, dailyData, hourlyData, cityName)
+        console.log(
+          '[天气] 转换成功: temp=',
+          weatherData.temperature,
+          'city=',
+          weatherData.city,
+          'hourly条数=',
+          weatherData.hourly.length
+        )
 
         setData(weatherData)
         saveToCache(weatherData)
         setError(null)
       } catch (err: unknown) {
         if (err instanceof DOMException && err.name === 'AbortError') {
+          console.log('[天气] 请求被取消 (AbortError)')
           return
         }
 
         const errorMessage = err instanceof Error ? err.message : '获取天气数据失败'
+        console.error('[天气] fetchWeather 异常:', errorMessage, err)
         setError(errorMessage)
-        console.error('[天气插件] 获取数据失败:', err)
 
         // 离线时尝试返回缓存数据
         if (!dataRef.current) {
