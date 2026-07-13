@@ -3,17 +3,41 @@ use serde_json::{json, Value};
 
 #[tauri::command]
 pub async fn geolocate_ip() -> Result<Value, String> {
-    let client = reqwest::Client::builder()
+    let mut builder = reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
-        .user_agent("InfoBoard/1.0")
-        .build()
+        .user_agent("InfoBoard/1.0");
+
+    // 读取系统代理环境变量（HTTPS_PROXY / https_proxy / ALL_PROXY / all_proxy）
+    let proxy_env = std::env::var("HTTPS_PROXY")
+        .or_else(|_| std::env::var("https_proxy"))
+        .or_else(|_| std::env::var("ALL_PROXY"))
+        .or_else(|_| std::env::var("all_proxy"))
+        .ok()
+        .filter(|s| !s.is_empty());
+
+    if let Some(proxy_url) = &proxy_env {
+        match reqwest::Proxy::https(proxy_url) {
+            Ok(proxy) => {
+                builder = builder.proxy(proxy);
+                eprintln!("[geolocate] 使用代理: {proxy_url}");
+            }
+            Err(e) => {
+                eprintln!("[geolocate] 代理配置失败，跳过代理: {e}");
+            }
+        }
+    } else {
+        eprintln!("[geolocate] 未检测到代理环境变量");
+    }
+
+    let client = builder.build()
         .map_err(|e| format!("HTTP 客户端创建失败: {e}"))?;
 
+    let url = "https://ip-api.com/json/?fields=status,message,country,regionName,city,lat,lon";
     let resp = client
-        .get("https://ip-api.com/json/?fields=status,message,country,regionName,city,lat,lon")
+        .get(url)
         .send()
         .await
-        .map_err(|e| format!("IP 定位请求失败: {e}"))?;
+        .map_err(|e| format!("IP 定位请求失败 (代理={}): {e}", proxy_env.as_deref().unwrap_or("无")))?;
 
     if !resp.status().is_success() {
         return Err(format!("IP 定位 HTTP {}", resp.status().as_u16()));
