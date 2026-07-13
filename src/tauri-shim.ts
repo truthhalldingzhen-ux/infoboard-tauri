@@ -10,6 +10,7 @@ export function initTauriShim() {
     isMaximized: () => invoke('window_is_maximized'),
     isVisible: () => invoke('window_is_visible'),
     platform: 'win32',
+    geolocate: () => invoke('geolocate_ip'),
     toggleTitleBar: async () => {
       window.dispatchEvent(new CustomEvent('toggle-titlebar'))
       return true

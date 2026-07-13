@@ -25,6 +25,7 @@ interface ElectronAPI {
   isMaximized: () => Promise<boolean>
   isVisible: () => Promise<boolean>
   platform: string
+  geolocate: () => Promise<any>
   toggleTitleBar: () => Promise<boolean>
   titleBarVisible: () => Promise<boolean>
   setAutoStart: (enabled: boolean) => Promise<boolean>

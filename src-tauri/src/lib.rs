@@ -3,6 +3,7 @@ use tauri_plugin_window_state::{WindowExt, StateFlags};
 
 mod core {
     pub mod autostart;
+    pub mod geolocate;
     pub mod toast;
     pub mod tray;
     pub mod window;
@@ -78,6 +79,7 @@ pub fn run() {
             core::window::window_close,
             core::window::window_is_maximized,
             core::window::window_is_visible,
+            core::geolocate::geolocate_ip,
             plugins::opencode::opencode_get_usage,
             plugins::opencode::opencode_get_sessions,
             plugins::opencode::opencode_get_minimax,

@@ -96,11 +96,8 @@ export function useLocationSearch(): UseLocationSearchReturn & {
     setSearchError(null)
 
     try {
-      // 第 1 步：ip-api.com 获取坐标
-      const ipRes = await fetch('https://ipapi.co/json/', { signal: AbortSignal.timeout(5000) })
-      if (!ipRes.ok) throw new Error('IP 定位请求失败')
-
-      const ipData = await ipRes.json()
+      // 第 1 步：通过 Rust 后端获取 IP 定位（避免浏览器 CORS 限制）
+      const ipData = await window.electronAPI.geolocate()
       console.log('[天气插件] IP 定位结果:', JSON.stringify(ipData))
       if (ipData.error) throw new Error(`IP 定位失败: ${ipData.reason || 'unknown'}`)
 
