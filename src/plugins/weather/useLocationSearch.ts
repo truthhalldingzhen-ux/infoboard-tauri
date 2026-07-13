@@ -89,35 +89,69 @@ export function useLocationSearch(): UseLocationSearchReturn & {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   /**
-   * 自动定位：ip-api.com 坐标 → 和风 GeoAPI 反查区级
+   * 请求浏览器 GPS 精确定位（需要用户授权）
+   * 成功返回 { lat, lon }，失败返回 null
+   */
+  const requestGPS = useCallback((): Promise<{ lat: number; lon: number } | null> => {
+    return new Promise((resolve) => {
+      if (!navigator.geolocation) {
+        console.log('[天气插件] 浏览器不支持 GPS 定位')
+        return resolve(null)
+      }
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          console.log('[天气插件] GPS 定位成功:', pos.coords.latitude, pos.coords.longitude)
+          resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude })
+        },
+        (err) => {
+          console.log('[天气插件] GPS 定位失败 (code=' + err.code + '):', err.message)
+          resolve(null)
+        },
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
+      )
+    })
+  }, [])
+
+  /**
+   * 自动定位：浏览器GPS → IP定位fallback → 和风GeoAPI反查
    */
   const autoLocate = useCallback(async () => {
     setSearching(true)
     setSearchError(null)
 
     try {
-      // 第 1 步：通过 Rust 后端获取 IP 定位（避免浏览器 CORS 限制）
-      const ipData = await window.electronAPI.geolocate()
-      console.log('[天气插件] IP 定位结果:', JSON.stringify(ipData))
-      if (ipData.error) throw new Error(`IP 定位失败: ${ipData.reason || 'unknown'}`)
+      // 第 1 步：尝试浏览器 GPS 精确定位
+      let lat: number, lon: number
+      const gps = await requestGPS()
+
+      if (gps) {
+        lat = gps.lat
+        lon = gps.lon
+        console.log('[天气插件] 使用 GPS 坐标:', lat, lon)
+      } else {
+        // GPS 失败，回退到 IP 定位
+        const ipData = await window.electronAPI.geolocate()
+        console.log('[天气插件] IP 定位结果:', JSON.stringify(ipData))
+        if (ipData.error) throw new Error(`IP 定位失败: ${ipData.reason || 'unknown'}`)
+        lat = ipData.latitude
+        lon = ipData.longitude
+        console.log('[天气插件] 使用 IP 坐标:', lat, lon)
+      }
 
       // 第 2 步：用坐标反查和风天气 GeoAPI（精确到区）
-      const geoResult = await reverseGeocode(ipData.latitude, ipData.longitude)
+      const geoResult = await reverseGeocode(lat, lon)
 
       if (geoResult) {
         // GeoAPI 成功：返回区级精度
         setResults([geoResult])
         setKeyword(geoResult.name)
       } else {
-        // GeoAPI 失败：回退到 IP 坐标 + 城市名
+        // GeoAPI 失败：直接用坐标
         const fallback: CityInfo = {
           locationId: '',
-          name: ipData.city || ipData.region || '未知',
-          adm2: ipData.city,
-          adm1: ipData.region,
-          country: ipData.country_name,
-          lat: String(ipData.latitude),
-          lon: String(ipData.longitude),
+          name: `${lat.toFixed(2)},${lon.toFixed(2)}`,
+          lat: String(lat),
+          lon: String(lon),
         }
         setResults([fallback])
         setKeyword(fallback.name)
