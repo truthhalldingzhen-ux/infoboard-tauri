@@ -155,7 +155,7 @@ function getLocationParam(city: CityInfo): string {
 function transformWeatherData(
   nowRes: QWeatherNowResponse,
   dailyRes: QWeatherDailyResponse,
-  hourlyRes: QWeatherHourlyResponse,
+  hourlyRes: QWeatherHourlyResponse | null,
   cityName: string
 ): WeatherData {
   const now = nowRes.now
@@ -178,13 +178,18 @@ function transformWeatherData(
       description: day.textDay,
       icon: day.iconDay,
     })),
-    hourly: hourlyRes.hourly.slice(0, 24).map((h): HourlyForecast => ({
-      time: new Date(h.fxTime).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
-      temp: parseInt(h.temp, 10) || 0,
-      icon: h.icon,
-      description: h.text,
-      pop: parseInt(h.pop, 10) || 0,
-    })),
+    hourly: hourlyRes
+      ? hourlyRes.hourly.slice(0, 24).map((h): HourlyForecast => ({
+          time: new Date(h.fxTime).toLocaleTimeString('zh-CN', {
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+          temp: parseInt(h.temp, 10) || 0,
+          icon: h.icon,
+          description: h.text,
+          pop: parseInt(h.pop, 10) || 0,
+        }))
+      : [],
     updatedAt: Date.now(),
   }
 }
@@ -298,8 +303,8 @@ export function useWeather(): UseWeatherReturn {
       setError(null)
 
       try {
-        // 并行请求实时天气、3 天预报、24 小时预报
-        const [nowRes, dailyRes, hourlyRes] = await Promise.all([
+        // 并行请求实时天气、3 天预报；逐时预报在付费版才有，单独处理
+        const [nowRes, dailyRes, hourlyRes] = await Promise.allSettled([
           fetch(buildUrl('/v7/weather/now', locationParam), {
             signal: controller.signal,
           }),
@@ -311,19 +316,26 @@ export function useWeather(): UseWeatherReturn {
           }),
         ])
 
-        if (!nowRes.ok) {
-          throw new Error(`实时天气请求失败 (${nowRes.status})`)
+        if (nowRes.status !== 'fulfilled' || !nowRes.value.ok) {
+          const code = nowRes.status === 'fulfilled' ? nowRes.value.status : 0
+          throw new Error(`实时天气请求失败 (${code})`)
         }
-        if (!dailyRes.ok) {
-          throw new Error(`预报数据请求失败 (${dailyRes.status})`)
-        }
-        if (!hourlyRes.ok) {
-          throw new Error(`逐时预报请求失败 (${hourlyRes.status})`)
+        if (dailyRes.status !== 'fulfilled' || !dailyRes.value.ok) {
+          const code = dailyRes.status === 'fulfilled' ? dailyRes.value.status : 0
+          throw new Error(`预报数据请求失败 (${code})`)
         }
 
-        const nowData: QWeatherNowResponse = await nowRes.json()
-        const dailyData: QWeatherDailyResponse = await dailyRes.json()
-        const hourlyData: QWeatherHourlyResponse = await hourlyRes.json()
+        const nowData: QWeatherNowResponse = await nowRes.value.json()
+        const dailyData: QWeatherDailyResponse = await dailyRes.value.json()
+        let hourlyData: QWeatherHourlyResponse | null = null
+
+        if (hourlyRes.status === 'fulfilled' && hourlyRes.value.ok) {
+          try {
+            hourlyData = await hourlyRes.value.json()
+          } catch {
+            /* 逐时预报解析失败不阻塞主流程 */
+          }
+        }
 
         // 检查和风天气业务状态码
         if (nowData.code !== '200') {

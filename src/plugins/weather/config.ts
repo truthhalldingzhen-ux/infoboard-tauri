@@ -6,13 +6,13 @@
  * 和风天气控制台：https://console.qweather.com
  */
 
-/** 和风天气 API Host（在控制台 → 设置中查看，用户在设置页配置） */
-export const QWEATHER_API_HOST = ''
+/** 和风天气 API Host（免费版默认 devapi.qweather.com，付费版 api.qweather.com） */
+export const QWEATHER_API_HOST = 'devapi.qweather.com'
 
 /** 和风天气 GeoAPI Host（城市搜索） */
-export const GEO_API_HOST = 'geoapi.qweatherapi.com'
+export const GEO_API_HOST = 'geoapi.qweather.com'
 
-/** 和风天气 API Key（用户在设置页配置） */
+/** 和风天气 API Key（在设置面板 → 天气 API 中填写） */
 export const QWEATHER_API_KEY = ''
 
 /** 默认地区 LocationID（北京 = 101010100） */

@@ -1,12 +1,10 @@
 // ─── SMTC 媒体控制 ───
 //
-// 通过 PowerShell 子进程调用 Windows SMTC API：
-//   1. media_get_current_session() — 查询 SMTC 会话 + B站窗口标题
-//   2. media_send_command() — 发送播放控制命令
-//
-// 缩略图缓存：避免每秒都读 SMTC 图片流浪费性能
-//
-// 超时保护：查询 12 秒超时，命令发送 5 秒超时
+// 通过 PowerShell 子进程调用 Windows SMTC API。
+// 复刻自 Electron 版 mediaControl.ts（已验证生产可用）。
+// 每次调用启动独立的 PS 进程，结束后 COM 引用自动释放。
+//   1. media_get_current_session()
+//   2. media_send_command()
 
 pub mod types;
 
@@ -18,88 +16,156 @@ use types::{MediaSession, ThumbnailCache};
 
 // ─── 常量 ───
 
-/// 查询超时（秒）
 const QUERY_TIMEOUT_SECS: u64 = 12;
-/// 命令发送超时（秒）
 const COMMAND_TIMEOUT_SECS: u64 = 5;
-/// PowerShell 执行策略
-const PS_EXE: &str = "powershell.exe";
-const PS_ARGS: [&str; 4] = [
-    "-NoProfile",
-    "-NonInteractive",
-    "-ExecutionPolicy",
-    "Bypass",
-];
 
-// ─── PowerShell 脚本 ───
+// ─── PowerShell 辅助（复刻 Electron mediaControl.ts） ───
 
-/// 查询会话 + B站窗口标题（合并单次 PS 调用）
-const PS_QUERY_COMBINED: &str = r#"
+/// 已验证的 PS_AWAIT_HELPER（原始项目生产可用）
+/// 注意：`IAsyncOperation`1` 只需一个反引号！
+const PS_AWAIT_HELPER: &str = r#"
 Add-Type -AssemblyName System.Runtime.WindowsRuntime
-$null = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType = WindowsRuntime]
-try {
-    $task = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync()
-    $manager = $task.GetAwaiter().GetResult()
-    $session = $manager.GetCurrentSession()
-    if ($session -ne $null) {
-        $mediaProps = $session.TryGetMediaPropertiesAsync().GetAwaiter().GetResult()
-        $playback = $session.GetPlaybackInfo()
-        $status = $playback.PlaybackStatus.ToString()
-        $thumbBase64 = ""
-        if ($mediaProps.Thumbnail -ne $null) {
-            try {
-                $thumbStream = $mediaProps.Thumbnail.OpenReadAsync().GetAwaiter().GetResult()
-                if ($thumbStream -ne $null -and $thumbStream.CanRead) {
-                    $ms = New-Object System.IO.MemoryStream
-                    $thumbStream.CopyTo($ms)
-                    $thumbBytes = $ms.ToArray()
-                    if ($thumbBytes.Length -gt 0) {
-                        $thumbBase64 = [Convert]::ToBase64String($thumbBytes)
-                    }
-                    $ms.Dispose()
-                    $thumbStream.Dispose()
-                }
-            } catch {}
-        }
-        $result = @{
-            title = if ($mediaProps.Title) { $mediaProps.Title } else { "" }
-            artist = if ($mediaProps.Artist) { $mediaProps.Artist } else { "" }
-            thumbnail = if ($thumbBase64) { "data:image/jpeg;base64,$thumbBase64" } else { "" }
-            playbackStatus = $status
-            sourceAppId = if ($session.SourceAppUserModelId) { $session.SourceAppUserModelId } else { "" }
-        }
-        Write-Output (ConvertTo-Json $result -Compress)
-        exit 0
-    }
-} catch {}
-Write-Output "null"
+$asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' })[0]
+function Await($WinRtTask, $ResultType) {
+    $asTask = $asTaskGeneric.MakeGenericMethod($ResultType)
+    $netTask = $asTask.Invoke($null, @($WinRtTask))
+    $netTask.Wait(-1) | Out-Null
+    $netTask.Result
+}
 "#;
 
-/// 发送播放控制命令
-const PS_SEND_COMMAND: &str = r#"
-param($cmd)
-Add-Type -AssemblyName System.Runtime.WindowsRuntime
-$null = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType = WindowsRuntime]
-try {
-    $task = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync()
-    $manager = $task.GetAwaiter().GetResult()
-    $session = $manager.GetCurrentSession()
-    if ($session -eq $null) { Write-Output "false"; exit 0 }
-    $success = $false
-    switch ($cmd) {
-        "play"    { $r = $session.TryPlayAsync().GetAwaiter().GetResult(); $success = $r }
-        "pause"   { $r = $session.TryPauseAsync().GetAwaiter().GetResult(); $success = $r }
-        "toggle"  { $r = $session.TryTogglePlayPauseAsync().GetAwaiter().GetResult(); $success = $r }
-        "next"    { $r = $session.TrySkipNextAsync().GetAwaiter().GetResult(); $success = $r }
-        "previous" { $r = $session.TrySkipPreviousAsync().GetAwaiter().GetResult(); $success = $r }
+/// 合并查询脚本：SMTC + 窗口标题（复刻 Electron queryCombined + BiliWinEnum2）
+const PS_QUERY_COMBINED: &str = r#"
+# C# 内联：枚举 B站窗口标题
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Collections.Generic;
+
+public class BiliWinEnum2 {
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+
+    [DllImport("user32.dll")]
+    public static extern int GetWindowTextLength(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr hWnd);
+
+    public static string GetVideoTitle() {
+        var titles = new List<string>();
+        var pids = new HashSet<uint>();
+        foreach (var proc in System.Diagnostics.Process.GetProcesses()) {
+            try {
+                var name = proc.ProcessName.ToLower();
+                if (name.Contains("bilibili") || name.Contains("哔哩哔哩")) pids.Add((uint)proc.Id);
+            } catch {}
+        }
+        if (pids.Count == 0) return "";
+        EnumWindows((hWnd, lParam) => {
+            uint pid;
+            GetWindowThreadProcessId(hWnd, out pid);
+            if (!pids.Contains(pid)) return true;
+            if (!IsWindowVisible(hWnd)) return true;
+            int len = GetWindowTextLength(hWnd);
+            if (len <= 0) return true;
+            var sb = new StringBuilder(len + 1);
+            GetWindowText(hWnd, sb, sb.Capacity);
+            titles.Add(sb.ToString());
+            return true;
+        }, IntPtr.Zero);
+        if (titles.Count == 0) return "";
+        string best = null;
+        foreach (var t in titles) {
+            if (t.Contains("干杯~") || t == "哔哩哔哩" || t == "bilibili") continue;
+            if (t == "MSCTFIME UI" || t == "Default IME") continue;
+            if (best == null || t.Length > best.Length) best = t;
+        }
+        return best ?? "";
     }
-    if ($success) { Write-Output "true" } else { Write-Output "false" }
-} catch { Write-Output "false" }
+}
+"@
+
+$sessionManagerType = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType = WindowsRuntime]
+try {
+    $manager = Await ($sessionManagerType::RequestAsync()) $sessionManagerType
+    $session = $manager.GetCurrentSession()
+
+    $appId = ""
+    $status = ""
+    $smtcTitle = ""
+    $smtcArtist = ""
+    $smtcThumbnail = ""
+
+    if ($session -ne $null) {
+        $playbackInfo = $session.GetPlaybackInfo()
+        $appId = $session.SourceAppUserModelId
+        $status = $playbackInfo.PlaybackStatus.ToString()
+
+        try {
+            $mediaProperties = Await ($session.TryGetMediaPropertiesAsync()) ([System.Object])
+            if ($mediaProperties -ne $null) {
+                $smtcTitle = [string]$mediaProperties.Title
+                $smtcArtist = [string]$mediaProperties.Artist
+
+                try {
+                    $thumbRef = $mediaProperties.Thumbnail
+                    if ($thumbRef -ne $null) {
+                        $stream = Await ($thumbRef.OpenReadAsync()) ([System.Object])
+                        if ($stream -ne $null -and $stream.Size -gt 0 -and $stream.Size -lt 524288) {
+                            $ms = New-Object System.IO.MemoryStream
+                            $stream.AsStreamForRead().CopyTo($ms)
+                            $bytes = $ms.ToArray()
+                            if ($bytes.Length -gt 0) {
+                                $smtcThumbnail = [Convert]::ToBase64String($bytes)
+                            }
+                            $ms.Close()
+                        }
+                        $stream.Dispose()
+                    }
+                } catch {}
+            }
+        } catch {}
+    }
+
+    $windowTitle = [BiliWinEnum2]::GetVideoTitle()
+
+    @{ appId=$appId; status=$status; smtcTitle=$smtcTitle; smtcArtist=$smtcArtist; smtcThumbnail=$smtcThumbnail; windowTitle=$windowTitle } | ConvertTo-Json -Compress
+} catch {
+    Write-Output "{""error"":""$($_.Exception.Message)""}"
+}
+"#;
+
+/// 发送控制命令脚本（复刻 Electron sendMediaCommand）
+const PS_SEND_COMMAND: &str = r#"
+$sessionManagerType = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType = WindowsRuntime]
+try {
+    $manager = Await ($sessionManagerType::RequestAsync()) $sessionManagerType
+    $session = $manager.GetCurrentSession()
+
+    if ($session -eq $null) {
+        Write-Output "NO_SESSION"
+        exit
+    }
+
+    $result = Await ($session.{method}()) ([System.Boolean])
+    Write-Output "OK:$result"
+} catch {
+    Write-Output "ERROR: $($_.Exception.Message)"
+}
 "#;
 
 // ─── 状态管理 ───
 
-/// 应用状态（存放缩略图缓存）
 pub struct AppState {
     pub thumbnail_cache: Mutex<Option<ThumbnailCache>>,
 }
@@ -114,178 +180,217 @@ impl AppState {
 
 // ─── PowerShell 执行器 ───
 
-/// 运行 PowerShell 脚本并返回标准输出
-fn run_powershell(script: &str, args: &[&str], timeout_secs: u64) -> Result<String, String> {
-    let mut cmd = Command::new(PS_EXE);
-    cmd.args(&PS_ARGS);
-
-    if !args.is_empty() {
-        cmd.args(args);
-    }
-
-    cmd.arg("-Command")
-        .arg(script)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
+fn run_powershell(script: &str, timeout_secs: u64) -> Result<String, String> {
+    let mut cmd = Command::new("powershell.exe");
+    cmd.args([
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        script,
+    ])
+    .stdout(std::process::Stdio::piped())
+    .stderr(std::process::Stdio::piped());
 
     let mut child = cmd.spawn().map_err(|e| format!("启动 PowerShell 失败: {e}"))?;
 
-    // 等待子进程完成（超时保护）
     let start = std::time::Instant::now();
     let timeout = Duration::from_secs(timeout_secs);
 
     loop {
         match child.try_wait() {
-            Ok(Some(status)) => {
-                if status.success() {
-                    use std::io::Read;
-                    let mut output = String::new();
-                    child
-                        .stdout
-                        .take()
-                        .ok_or("无法读取 PowerShell 输出")?
-                        .read_to_string(&mut output)
-                        .map_err(|e| format!("读取 PowerShell 输出失败: {e}"))?;
-                    return Ok(output.trim().to_string());
-                } else {
-                    use std::io::Read;
-                    let mut stderr = String::new();
-                    child
-                        .stderr
-                        .take()
-                        .ok_or("无法读取 PowerShell 错误")?
-                        .read_to_string(&mut stderr)
-                        .map_err(|e| format!("读取 PowerShell 错误失败: {e}"))?;
-                    return Err(format!("PowerShell 错误: {stderr}"));
-                }
+            Ok(Some(_status)) => {
+                use std::io::Read;
+                let mut output = String::new();
+                child.stdout.take()
+                    .ok_or("无法读取输出")?
+                    .read_to_string(&mut output)
+                    .map_err(|e| format!("读取输出失败: {e}"))?;
+                return Ok(output.trim().to_string());
             }
             Ok(None) => {
-                // 子进程仍在运行
                 if start.elapsed() > timeout {
                     let _ = child.kill();
-                    return Err(format!("PowerShell 超时（>{timeout_secs}s）"));
+                    return Err("PowerShell 超时".to_string());
                 }
                 std::thread::sleep(Duration::from_millis(50));
             }
-            Err(e) => {
-                return Err(format!("PowerShell 等待失败: {e}"));
-            }
+            Err(e) => return Err(format!("等待 PowerShell 失败: {e}")),
         }
     }
-}
-
-// ─── 解析 B站窗口标题 ───
-
-/// 从 "视频标题 — UP主 — 哔哩哔哩" 格式提取视频标题和UP主
-#[allow(dead_code)]
-fn parse_bilibili_window_title(window_title: &str) -> Option<(String, String)> {
-    // 格式: "视频标题 — UP主 — 哔哩哔哩"
-    let parts: Vec<&str> = window_title.split("—").map(|s| s.trim()).collect();
-    if parts.len() >= 3 && parts[2].contains("哔哩哔哩") {
-        let video_title = parts[0].to_string();
-        let up_name = parts[1].to_string();
-        if !video_title.is_empty() && !up_name.is_empty() {
-            return Some((video_title, up_name));
-        }
-    }
-    None
 }
 
 // ─── Tauri Commands ───
 
-/// 获取当前 SMTC 媒体会话
-///
-/// 返回当前正在播放的媒体会话信息，包括标题、艺术家、缩略图、播放状态和来源应用。
-/// 缩略图使用 Rust 侧缓存：标题不变时复用上次读取的 base64。
-/// 无活跃会话时返回 `None`。
 #[tauri::command]
 pub async fn media_get_current_session(
     state: State<'_, AppState>,
 ) -> Result<Option<MediaSession>, String> {
-    // 使用 spawn_blocking 避免阻塞主线程
-    let result = tokio::task::spawn_blocking(move || {
-        run_powershell(PS_QUERY_COMBINED, &[], QUERY_TIMEOUT_SECS)
+    // 拼接 helper + 查询脚本
+    let script = format!("{PS_AWAIT_HELPER}\n{PS_QUERY_COMBINED}");
+
+    let output = tokio::task::spawn_blocking(move || {
+        run_powershell(&script, QUERY_TIMEOUT_SECS)
     })
     .await
-    .map_err(|e| format!("spawn_blocking 失败: {e}"))?;
+    .map_err(|e| format!("spawn_blocking 失败: {e}"))?
+    .map_err(|e| {
+        eprintln!("[media_get_current_session] {e}");
+        "PowerShell 查询失败".to_string()
+    })?;
 
-    let output = match result {
-        Ok(o) => o,
+    // 解析 JSON
+    eprintln!("[media_get_current_session] 原始 PS 输出: {output}");
+    let json: serde_json::Value = match serde_json::from_str(&output) {
+        Ok(v) => v,
         Err(e) => {
-            eprintln!("[media_get_current_session] PS 查询失败: {e}");
+            eprintln!("[media_get_current_session] JSON 解析失败: {e} 输出: {output}");
             return Ok(None);
         }
     };
 
-    // "null" 表示无会话
-    if output == "null" || output.is_empty() {
+    // 检查错误
+    if json.get("error").and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false) {
+        eprintln!("[media_get_current_session] PS 错误: {}", json["error"]);
         return Ok(None);
     }
 
-    // 解析 JSON
-    let mut session: MediaSession = match serde_json::from_str(&output) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("[media_get_current_session] JSON 解析失败: {e}");
-            return Ok(None);
-        }
-    };
-
-    // 缩略图缓存逻辑
-    let mut cache = state.thumbnail_cache.lock().map_err(|e| format!("锁失败: {e}"))?;
-    if let Some(ref cached) = *cache {
-        if cached.title == session.title {
-            // 标题不变，复用缓存
-            session.thumbnail = format!("{}{}", cached.mime_prefix, cached.data);
-        } else {
-            // 标题变了，更新缓存
-            let (mime_prefix, data) = split_thumbnail_data(&session.thumbnail);
-            *cache = Some(ThumbnailCache {
-                title: session.title.clone(),
-                data,
-                mime_prefix,
-            });
-        }
-    } else {
-        // 首次缓存
-        let (mime_prefix, data) = split_thumbnail_data(&session.thumbnail);
-        *cache = Some(ThumbnailCache {
-            title: session.title.clone(),
-            data,
-            mime_prefix,
-        });
+    // 检查状态（原始项目逻辑：状态为空 → 无会话）
+    let status = json["status"].as_str().unwrap_or("");
+    if status.is_empty() {
+        return Ok(None);
     }
 
-    Ok(Some(session))
+    let app_id = json["appId"].as_str().unwrap_or("").to_string();
+    let mut smtc_title = json["smtcTitle"].as_str().unwrap_or("").to_string();
+    let smtc_artist = json["smtcArtist"].as_str().unwrap_or("").to_string();
+    let window_title = json["windowTitle"].as_str().unwrap_or("").to_string();
+
+    // SMTC 标题为空时，用窗口标题兜底（B站 UWP 的 SMTC 不设置 Title）
+    if smtc_title.is_empty() && !window_title.is_empty() {
+        // 从 "视频标题 — UP主 — 哔哩哔哩" 格式提取
+        if let Some((title, _artist)) = parse_window_title(&window_title) {
+            smtc_title = title;
+        }
+    }
+
+    // 窗口标题也空 → 无活跃视频
+    if smtc_title.is_empty() || smtc_title == "哔哩哔哩" {
+        return Ok(None);
+    }
+
+    let raw_thumb = json["smtcThumbnail"].as_str().unwrap_or("").to_string();
+
+    let thumbnail = if raw_thumb.is_empty() {
+        String::new()
+    } else {
+        format!("data:image/jpeg;base64,{raw_thumb}")
+    };
+
+    // 缩略图缓存
+    let mut cache = state.thumbnail_cache.lock().map_err(|e| format!("锁失败: {e}"))?;
+    let (thumbnail_data, thumbnail_mime) = if let Some(ref c) = *cache {
+        if c.title == smtc_title {
+            (c.data.clone(), c.mime_prefix.clone())
+        } else {
+            let (mime, data) = split_thumbnail_data(&thumbnail);
+            *cache = Some(ThumbnailCache {
+                title: smtc_title.clone(),
+                data,
+                mime_prefix: mime.clone(),
+            });
+            (cache.as_ref().unwrap().data.clone(), cache.as_ref().unwrap().mime_prefix.clone())
+        }
+    } else {
+        let (mime, data) = split_thumbnail_data(&thumbnail);
+        *cache = Some(ThumbnailCache { title: smtc_title.clone(), data, mime_prefix: mime.clone() });
+        (cache.as_ref().unwrap().data.clone(), cache.as_ref().unwrap().mime_prefix.clone())
+    };
+    let final_thumb = if thumbnail_data.is_empty() { String::new() } else { format!("{thumbnail_mime}{thumbnail_data}") };
+
+    // 标准化播放状态
+    let playback_status = normalize_status(status);
+
+    Ok(Some(MediaSession {
+        title: smtc_title,
+        artist: smtc_artist,
+        thumbnail: final_thumb,
+        playback_status,
+        source_app_id: app_id,
+    }))
 }
 
 /// 发送播放控制命令
-///
-/// 支持命令：`play`, `pause`, `toggle`, `next`, `previous`
-/// 成功返回 `true`，失败返回 `false`（不抛错）
 #[tauri::command]
-pub async fn media_send_command(_command: String) -> Result<bool, String> {
-    let result = tokio::task::spawn_blocking(move || {
-        run_powershell(PS_SEND_COMMAND, &[], COMMAND_TIMEOUT_SECS)
+pub async fn media_send_command(command: String) -> Result<bool, String> {
+    // 映射命令到 SMTC 方法名（复刻 Electron 做法）
+    let method = match command.as_str() {
+        "play" => "TryPlayAsync",
+        "pause" => "TryPauseAsync",
+        "toggle" => "TryTogglePlayPauseAsync",
+        "next" => "TrySkipNextAsync",
+        "previous" => "TrySkipPreviousAsync",
+        _ => return Err(format!("未知命令: {command}")),
+    };
+
+    let script = format!("{PS_AWAIT_HELPER}\n{}", PS_SEND_COMMAND.replace("{method}", method));
+
+    let output = tokio::task::spawn_blocking(move || {
+        run_powershell(&script, COMMAND_TIMEOUT_SECS)
     })
     .await
-    .map_err(|e| format!("spawn_blocking 失败: {e}"))?;
+    .map_err(|e| format!("spawn_blocking 失败: {e}"))?
+    .unwrap_or_else(|e| {
+        eprintln!("[media_send_command] {e}");
+        String::new()
+    });
 
-    match result {
-        Ok(output) => Ok(output.trim() == "true"),
-        Err(e) => {
-            eprintln!("[media_send_command] PS 执行失败: {e}");
-            Ok(false)
-        }
-    }
+    Ok(output.starts_with("OK:true"))
 }
 
 // ─── 工具函数 ───
 
-/// 将 "data:image/jpeg;base64,xxx" 拆分为前缀和数据部分
+fn normalize_status(s: &str) -> String {
+    match s.to_lowercase().as_str() {
+        "playing" => "playing".to_string(),
+        "paused" => "paused".to_string(),
+        "stopped" => "stopped".to_string(),
+        _ => "closed".to_string(),
+    }
+}
+
+/// 从窗口标题提取视频标题（复刻 Electron parseWindowTitle）
+/// "视频标题 — UP主 — 哔哩哔哩" → 标题 + UP主
+fn parse_window_title(window_title: &str) -> Option<(String, String)> {
+    let cleaned = window_title
+        .replace(" —哔哩哔哩", "")
+        .replace(" —哔哩哔哩", "")
+        .replace(" -哔哩哔哩", "")
+        .replace(" - bilibili", "")
+        .replace(" - 哔哩哔哩", "")
+        .trim()
+        .to_string();
+
+    if cleaned.is_empty() || cleaned == "哔哩哔哩" || cleaned == "bilibili" || cleaned.contains("干杯~") {
+        return None;
+    }
+
+    let parts: Vec<&str> = cleaned.split(&['—', '-'][..]).collect();
+    if parts.len() >= 2 {
+        let artist = parts.last().unwrap().trim().to_string();
+        let title = parts[..parts.len() - 1].join(" - ").trim().to_string();
+        if !title.is_empty() && !artist.is_empty() && artist.len() < 20 {
+            return Some((title, artist));
+        }
+    }
+
+    Some((cleaned, String::new()))
+}
+
 fn split_thumbnail_data(uri: &str) -> (String, String) {
     if let Some(pos) = uri.find("base64,") {
-        let prefix = uri[..pos + 7].to_string(); // 包含 "base64,"
+        let prefix = uri[..pos + 7].to_string();
         let data = uri[pos + 7..].to_string();
         (prefix, data)
     } else {
@@ -300,24 +405,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_bilibili_window_title() {
-        let result = parse_bilibili_window_title("【4K】赛博朋克2077 全剧情电影 — 影视飓风 — 哔哩哔哩");
-        assert!(result.is_some());
-        let (title, artist) = result.unwrap();
-        assert_eq!(title, "【4K】赛博朋克2077 全剧情电影");
-        assert_eq!(artist, "影视飓风");
+    fn test_normalize_status() {
+        assert_eq!(normalize_status("Playing"), "playing");
+        assert_eq!(normalize_status("Paused"), "paused");
+        assert_eq!(normalize_status("Stopped"), "stopped");
+        assert_eq!(normalize_status("Closed"), "closed");
+        assert_eq!(normalize_status(""), "closed");
     }
 
     #[test]
-    fn test_parse_bilibili_window_title_no_match() {
-        let result = parse_bilibili_window_title("Visual Studio Code");
-        assert!(result.is_none());
+    fn test_parse_window_title() {
+        // 窗口标题已由 C# 代码清洗过，不含后缀
+        let r = parse_window_title("测试视频 — UP主");
+        assert!(r.is_some());
+        let (t, a) = r.unwrap();
+        assert_eq!(t, "测试视频");
+        assert_eq!(a, "UP主");
     }
 
     #[test]
-    fn test_parse_bilibili_window_title_too_few_parts() {
-        let result = parse_bilibili_window_title("测试视频 — 哔哩哔哩");
-        assert!(result.is_none());
+    fn test_parse_window_title_no_match() {
+        assert!(parse_window_title("哔哩哔哩 (゜-゜)つロ 干杯~").is_none());
     }
 
     #[test]

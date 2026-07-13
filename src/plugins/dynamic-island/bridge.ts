@@ -14,7 +14,9 @@ import type { MediaSession } from './types'
  */
 export async function getCurrentSession(): Promise<MediaSession | null> {
   try {
-    return await invoke<MediaSession | null>('media_get_current_session')
+    const result = await invoke<MediaSession | null>('media_get_current_session')
+    console.log('[dynamic-island] getCurrentSession 结果:', result)
+    return result
   } catch (err) {
     console.error('[dynamic-island] getCurrentSession 失败:', err)
     return null

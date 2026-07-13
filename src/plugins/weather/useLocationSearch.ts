@@ -97,33 +97,30 @@ export function useLocationSearch(): UseLocationSearchReturn & {
 
     try {
       // 第 1 步：ip-api.com 获取坐标
-      const ipRes = await fetch(
-        'http://ip-api.com/json/?lang=zh-CN&fields=status,country,regionName,city,lat,lon',
-        { signal: AbortSignal.timeout(5000) }
-      )
+      const ipRes = await fetch('https://ipapi.co/json/', { signal: AbortSignal.timeout(5000) })
       if (!ipRes.ok) throw new Error('IP 定位请求失败')
 
       const ipData = await ipRes.json()
       console.log('[天气插件] IP 定位结果:', JSON.stringify(ipData))
-      if (ipData.status !== 'success') throw new Error('IP 定位失败')
+      if (ipData.error) throw new Error(`IP 定位失败: ${ipData.reason || 'unknown'}`)
 
       // 第 2 步：用坐标反查和风天气 GeoAPI（精确到区）
-      const geoResult = await reverseGeocode(ipData.lat, ipData.lon)
+      const geoResult = await reverseGeocode(ipData.latitude, ipData.longitude)
 
       if (geoResult) {
         // GeoAPI 成功：返回区级精度
         setResults([geoResult])
         setKeyword(geoResult.name)
       } else {
-        // GeoAPI 失败：回退到市级
+        // GeoAPI 失败：回退到 IP 坐标 + 城市名
         const fallback: CityInfo = {
           locationId: '',
-          name: ipData.city || ipData.regionName,
+          name: ipData.city || ipData.region || '未知',
           adm2: ipData.city,
-          adm1: ipData.regionName,
-          country: ipData.country,
-          lat: String(ipData.lat),
-          lon: String(ipData.lon),
+          adm1: ipData.region,
+          country: ipData.country_name,
+          lat: String(ipData.latitude),
+          lon: String(ipData.longitude),
         }
         setResults([fallback])
         setKeyword(fallback.name)
