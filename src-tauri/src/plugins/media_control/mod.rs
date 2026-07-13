@@ -225,8 +225,9 @@ fn run_powershell(script: &str, timeout_secs: u64) -> Result<String, String> {
 
 #[tauri::command]
 pub async fn media_get_current_session(
-    state: State<'_, AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<Option<MediaSession>, String> {
+    println!("[SMTC] 获取当前媒体会话开始");
     // 拼接 helper + 查询脚本
     let script = format!("{PS_AWAIT_HELPER}\n{PS_QUERY_COMBINED}");
 

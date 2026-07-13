@@ -52,6 +52,11 @@ export function useMediaControl(): UseMediaControlReturn {
     try {
       setError(null)
       const session = await getCurrentSession()
+      if (session) {
+        console.log(`[SMTC] 检测到媒体: "${session.title}" (${session.playbackStatus})`)
+      } else {
+        console.log('[SMTC] 无活跃媒体会话')
+      }
 
       // 检测B站来源，自动补充封面和UP主信息
       if (session && isBilibiliSource(session.sourceAppId) && session.title) {
@@ -73,6 +78,7 @@ export function useMediaControl(): UseMediaControlReturn {
    */
   const sendCommand = useCallback(
     async (command: 'play' | 'pause' | 'toggle' | 'next' | 'previous') => {
+      console.log(`[SMTC] 发送命令: ${command}`)
       try {
         const success = await bridgeSendCommand(command)
 

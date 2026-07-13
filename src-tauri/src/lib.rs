@@ -38,11 +38,14 @@ pub fn run() {
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
                     if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        println!("[快捷键] Ctrl+Shift+I 触发");
                         // 切换主窗口显隐
                         if let Some(window) = app.get_webview_window("main") {
                             if window.is_visible().unwrap_or(false) {
+                                println!("[快捷键] 隐藏窗口");
                                 let _ = window.hide();
                             } else {
+                                println!("[快捷键] 显示窗口");
                                 let _ = window.show();
                                 let _ = window.set_focus();
                             }
@@ -55,6 +58,7 @@ pub fn run() {
         )
         .manage(plugins::media_control::AppState::new())
         .setup(|app| {
+            println!("[系统] InfoBoard 启动");
             core::tray::setup_tray(app.handle())?;
             // 恢复上次关闭时的窗口大小和位置
             if let Some(window) = app.get_webview_window("main") {

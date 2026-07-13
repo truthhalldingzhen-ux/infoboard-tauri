@@ -211,6 +211,7 @@ fn normalize_pic_url(pic: &str) -> String {
 /// 网络错误或无匹配时返回 `None`（不抛错）
 #[tauri::command]
 pub async fn bilibili_enrich_media(title: String) -> Option<BilibiliVideoInfo> {
+    println!("[B站] 搜索视频: {}", title);
     let client = match build_client() {
         Ok(c) => c,
         Err(e) => {

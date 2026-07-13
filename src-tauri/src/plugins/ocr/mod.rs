@@ -88,6 +88,7 @@ pub async fn ocr_recognize(
     state: tauri::State<'_, OcrEngine>,
     image_base64: String,
 ) -> Result<OcrResponse, String> {
+    println!("[OCR] 识别请求开始 (图片大小: {}B)", image_base64.len());
     // 构造请求 JSON
     let request = serde_json::json!({
         "image_base64": image_base64

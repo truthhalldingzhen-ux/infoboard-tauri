@@ -68,10 +68,12 @@ export function useTranslate(): UseTranslateReturn {
 
     try {
       const res = await niutrans.translate(text, targetLang)
+      console.log('[翻译] 翻译成功')
       setResult(res)
       refreshCharCount()
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '翻译失败'
+      console.log('[翻译] 失败:', msg)
       if (msg === 'API_KEY_MISSING') {
         setError('请先在设置中配置小牛翻译 API')
       } else {

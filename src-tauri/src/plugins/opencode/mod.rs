@@ -141,9 +141,11 @@ fn get_chrome_pids() -> Vec<u32> {
 
 #[tauri::command]
 pub async fn opencode_get_usage() -> Result<UsageStats, String> {
+    println!("[OpenCode] 查询用量开始");
     let cookie = match read_cookie() {
         Some(c) => c,
         None => {
+            println!("[OpenCode] cookie 文件不存在，返回空状态");
             return Ok(UsageStats {
                 db_exists: false,
                 today_tokens: 0.0,
@@ -179,6 +181,8 @@ pub async fn opencode_get_usage() -> Result<UsageStats, String> {
         })?;
 
     if !resp.status().is_success() {
+        let err_msg = format!("HTTP {}（cookie 可能已过期）", resp.status().as_u16());
+        println!("[OpenCode] {}", err_msg);
         return Ok(UsageStats {
             db_exists: true,
             today_tokens: 0.0,
@@ -221,6 +225,12 @@ pub async fn opencode_get_usage() -> Result<UsageStats, String> {
         });
     }
 
+    println!(
+        "[OpenCode] 用量查询成功 (今日: {:.1}%, 本周: {:.1}%, 本月: {:.1}%)",
+        rolling.as_ref().map(|r| r.usage_percent).unwrap_or(0.0),
+        weekly.as_ref().map(|r| r.usage_percent).unwrap_or(0.0),
+        monthly.as_ref().map(|r| r.usage_percent).unwrap_or(0.0),
+    );
     Ok(UsageStats {
         db_exists: true,
         today_tokens: rolling.as_ref().map(|r| r.usage_percent).unwrap_or(0.0),
@@ -242,6 +252,8 @@ pub async fn opencode_get_sessions() -> Result<Vec<SessionInfo>, String> {
 
 #[tauri::command]
 pub async fn opencode_get_minimax(api_key: Option<String>) -> Result<MiniMaxUsage, String> {
+    let has_key = api_key.as_ref().map(|k| !k.is_empty()).unwrap_or(false);
+    println!("[OpenCode] MiniMax 查询开始 (有 API Key: {})", has_key);
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(MINIMAX_TIMEOUT_SECS))
         .build()
@@ -293,23 +305,28 @@ pub async fn opencode_get_minimax(api_key: Option<String>) -> Result<MiniMaxUsag
 
 #[tauri::command]
 pub fn opencode_refresh_cookie() -> Result<RefreshResult, String> {
+    println!("[OpenCode] Cookie 刷新开始");
     // 检测 Chrome 是否运行
     if is_chrome_running() {
+        println!("[OpenCode] Chrome 已运行，TCP 触发刷新");
         // 路径 A: TCP 触发
         match cookie_tcp::tcp_send("refresh", 3000) {
             Ok(ref resp) if resp == "OK" => {
+                println!("[OpenCode] Cookie 刷新成功 (TCP)");
                 return Ok(RefreshResult {
                     started: true,
                     message: None,
                 });
             }
             Ok(resp) => {
+                println!("[OpenCode] Cookie 刷新失败 (TCP 响应: {resp})");
                 return Ok(RefreshResult {
                     started: false,
                     message: Some(format!("TCP 错误: {resp}")),
                 });
             }
             Err(e) => {
+                println!("[OpenCode] Cookie 刷新失败 (TCP: {e})");
                 return Ok(RefreshResult {
                     started: false,
                     message: Some(format!("TCP 失败: {e}")),

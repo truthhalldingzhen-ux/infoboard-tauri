@@ -37,6 +37,7 @@ try {
 /// 截取全屏，返回 data:image/png;base64,... 格式的 data URL
 #[tauri::command]
 pub async fn screenshot_capture() -> Result<String, String> {
+    println!("[截图] 开始捕获屏幕");
     let script = CAPTURE_SCRIPT;
 
     let output = timeout(Duration::from_secs(12), Command::new("powershell")
@@ -68,6 +69,7 @@ pub async fn screenshot_capture() -> Result<String, String> {
 /// 参数 data_url 应为裁剪后的 data:image/png;base64,... 格式
 #[tauri::command]
 pub fn screenshot_confirm(data_url: String) -> Result<(), String> {
+    println!("[截图] 确认截图，写入剪贴板");
     // 解析 data URL，提取 base64 部分
     let base64_str = data_url
         .split(',')

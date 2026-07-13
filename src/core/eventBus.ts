@@ -173,6 +173,10 @@ class EventBus {
    * ```
    */
   emit(type: string, payload: unknown, source: string): void {
+    console.log(
+      `[事件] ${type} ← ${source}`,
+      typeof payload === 'object' ? JSON.stringify(payload) : payload
+    )
     const typeListeners = this.listeners.get(type)
     if (!typeListeners || typeListeners.length === 0) return
 

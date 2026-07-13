@@ -68,6 +68,7 @@ pub async fn niutrans_translate(
     text: String,
     target_lang: String,
 ) -> Result<TranslateResult, String> {
+    println!("[翻译] 请求翻译 (目标语言: {})", target_lang);
     let store = get_store(&app)?;
     let api_key = store_get_string(&store, "apiKey")
         .ok_or_else(|| "API_KEY_MISSING".to_string())?;

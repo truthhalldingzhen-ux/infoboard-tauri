@@ -511,6 +511,7 @@ pub async fn mail_remove_account(
 pub async fn mail_connect_saved(
     state: tauri::State<'_, MailManager>,
 ) -> Result<Value, String> {
+    println!("[邮件] 连接邮箱开始");
     let manager = state.inner().clone();
     let result = tokio::task::spawn_blocking(move || manager.connect_saved())
         .await
@@ -537,10 +538,16 @@ pub async fn mail_fetch_recent(
 pub async fn mail_check_new(
     state: tauri::State<'_, MailManager>,
 ) -> Result<Value, String> {
+    println!("[邮件] 检测新邮件开始");
     let manager = state.inner().clone();
     let result = tokio::task::spawn_blocking(move || manager.check_new())
         .await
         .map_err(|e| format!("检测新邮件失败: {}", e))?;
+    println!(
+        "[邮件] 检测完成 (新邮件: {}, 验证码: {})",
+        result.new_mails.len(),
+        if result.code.is_some() { "有" } else { "无" }
+    );
     Ok(serde_json::json!({
         "newMails": result.new_mails,
         "code": result.code,

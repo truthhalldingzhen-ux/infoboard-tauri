@@ -18,10 +18,12 @@ export function TitleBar() {
   }, [])
 
   const handleMinimize = async () => {
+    console.log('[窗口] 点击最小化按钮')
     if (window.electronAPI) await window.electronAPI.minimize()
   }
 
   const handleMaximize = async () => {
+    console.log('[窗口] 点击最大化/还原按钮')
     if (window.electronAPI) {
       await window.electronAPI.maximize()
       setIsMaximized((prev) => !prev)
@@ -29,6 +31,7 @@ export function TitleBar() {
   }
 
   const handleClose = async () => {
+    console.log('[窗口] 点击关闭按钮')
     if (window.electronAPI) await window.electronAPI.close()
   }
 
