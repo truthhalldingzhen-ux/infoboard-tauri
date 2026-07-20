@@ -18,13 +18,13 @@ export function initTauriShim() {
     titleBarVisible: async () => true,
     setAutoStart: (enabled: boolean) => autostart.setEnabled(enabled).then(() => true),
     getAutoStart: () => autostart.isEnabled(),
-    startScreenshot: () => {
-      console.log('[截图] 功能暂未实现')
+    startScreenshot: () => invoke('screenshot_capture'),
+    confirmScreenshot: (dataUrl: string) => invoke('screenshot_confirm', { dataUrl }),
+    cancelScreenshot: () => invoke('screenshot_cancel'),
+    onScreenData: (cb: (dataUrl: string) => void) => {
+      invoke('screenshot_capture').then((v) => cb(v as string))
     },
-    confirmScreenshot: () => {},
-    cancelScreenshot: () => {},
-    onScreenData: () => {},
-    ocrRecognize: async () => ({ code: -1, data: '暂不支持' }),
+    ocrRecognize: async (imageBase64: string) => invoke('ocr_recognize', { imageBase64 }),
   }
 
   window.opencodeDB = {

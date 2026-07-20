@@ -34,14 +34,20 @@ function getDisabledPlugins(): string[] {
 /**
  * 初始化插件系统
  * 加载所有插件并注册到 PluginRegistry
- * 返回 Promise，调用方可以等待加载完成
+ * 返回 Promise，调用方可以等待加载完成。
+ * 使用 promise 门防止并发重复初始化。
  */
-export function initPluginSystem(): Promise<void> {
-  // 清空已有插件（热重载场景）
-  pluginRegistry.clear()
+let initPromise: Promise<void> | null = null
 
-  // 动态导入所有插件并返回 Promise
-  return importPlugins()
+export function initPluginSystem(): Promise<void> {
+  if (initPromise) return initPromise
+
+  initPromise = (async () => {
+    pluginRegistry.clear()
+    await importPlugins()
+  })()
+
+  return initPromise
 }
 
 /**
@@ -206,13 +212,11 @@ export function usePlugins(section: 'info' | 'tool'): InfoBoardPlugin[] {
     getDisabledPlugins().filter((id) => id !== 'settings')
   )
 
-  // 初始化插件系统
+  // 初始化插件系统（promise 门防止并发重复调用）
   useEffect(() => {
-    if (pluginRegistry.size === 0) {
-      initPluginSystem().then(() => {
-        setVersion((v) => v + 1)
-      })
-    }
+    initPluginSystem().then(() => {
+      setVersion((v) => v + 1)
+    })
   }, [])
 
   // 监听设置变更（插件启用/禁用切换时触发重新渲染）

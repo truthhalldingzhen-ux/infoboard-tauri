@@ -83,12 +83,14 @@ export function useSettings(): UseSettingsReturn {
       } catch {
         // 存储失败忽略
       }
-      // 派发设置变更事件
-      window.dispatchEvent(
-        new CustomEvent('settings:changed', {
-          detail: { key, value },
-        })
-      )
+      // 延迟派发事件避免在 React 渲染周期内跨组件 setState
+      setTimeout(() => {
+        window.dispatchEvent(
+          new CustomEvent('settings:changed', {
+            detail: { key, value },
+          })
+        )
+      }, 0)
       return next
     })
   }, [])
@@ -102,12 +104,13 @@ export function useSettings(): UseSettingsReturn {
       } catch {
         // 存储失败忽略
       }
-      // 派发一次设置变更事件
-      window.dispatchEvent(
-        new CustomEvent('settings:changed', {
-          detail: { key: 'batch', patch },
-        })
-      )
+      setTimeout(() => {
+        window.dispatchEvent(
+          new CustomEvent('settings:changed', {
+            detail: { key: 'batch', patch },
+          })
+        )
+      }, 0)
       return next
     })
   }, [])
@@ -124,11 +127,13 @@ export function useSettings(): UseSettingsReturn {
       } catch {
         // 存储失败忽略
       }
-      window.dispatchEvent(
-        new CustomEvent('settings:changed', {
-          detail: { key: 'disabledPlugins', value: disabled },
-        })
-      )
+      setTimeout(() => {
+        window.dispatchEvent(
+          new CustomEvent('settings:changed', {
+            detail: { key: 'disabledPlugins', value: disabled },
+          })
+        )
+      }, 0)
       return next
     })
   }, [])

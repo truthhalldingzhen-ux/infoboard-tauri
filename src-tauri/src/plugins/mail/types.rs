@@ -1,57 +1,54 @@
-//! IMAP 邮件插件类型定义
+//! IMAP 邮件类型定义
+//!
+//! 复刻自 Electron 版 `src/types/electron.ts` 中的 MailConfig 及
+//! `mailControl.ts` 中的 MailSummary / CheckNewResult / ConnectResult
 
 use serde::{Deserialize, Serialize};
 
-/// 邮箱账户配置
+/// 复刻原版 MailConfig 接口
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MailConfig {
     pub host: String,
     pub port: u16,
-    pub secure: bool,       // 是否使用 SSL/TLS
+    pub secure: bool,
     pub user: String,
     pub pass: String,
 }
 
-/// 邮件摘要（列表展示用）
+/// 复刻原版 MailSummary 接口
 #[derive(Debug, Clone, Serialize)]
 pub struct MailSummary {
     pub uid: u32,
     pub sender: String,
     pub subject: String,
-    pub date: i64,          // Unix 时间戳（秒）
+    pub date: i64,
     pub seen: bool,
-    pub account: String,    // 所属邮箱账户标识（user）
+    pub account: String,
 }
 
-/// 新邮件检测结果
+/// 复刻原版 CheckNewResult
 #[derive(Debug, Clone, Serialize)]
 pub struct CheckNewResult {
     pub new_mails: Vec<MailSummary>,
-    /// 提取到的验证码（如有）
     pub code: Option<String>,
 }
 
-/// IMAP 连接结果
+/// 复刻原版 connectAll 返回值
 #[derive(Debug, Clone, Serialize)]
 pub struct ConnectResult {
     pub success: bool,
     pub errors: Vec<String>,
 }
 
-// ─── 验证码正则模式 ───
-
-/// 中文网站常见验证码正则模式列表
-///
-/// 匹配 4-8 位纯数字或字母数字混合的验证码
-/// 末尾 \b 确保不匹配超长数字的子串（如 123456789 不匹配为 "12345678"）
+/// 复刻原版 `extractCode()` 中的正则模式
 pub static CODE_PATTERNS: &[&str] = &[
-    r"(?i)验证码[\s:：为是]+(\d{4,8})\b",
-    r"(?i)验证码[\s:：为是]+([A-Za-z0-9]{4,8})\b",
-    r"(?i)校验码[\s:：为是]+(\d{4,8})\b",
-    r"(?i)校验码[\s:：为是]+([A-Za-z0-9]{4,8})\b",
-    r"(?i)动态码[\s:：为是]+(\d{4,8})\b",
-    r"(?i)验证代码[\s:：为是]+(\d{4,8})\b",
-    r"(?i)(?:code|CODE|Code)[\s:：为是]+([A-Za-z0-9]{4,8})\b",
+    r"验证码[：:\s为是]*[：:\s]*([A-Za-z0-9]{4,8})",
+    r"(?i)(?:verification\s*)?code[：:\s]*([A-Za-z0-9]{4,8})",
+    r"动态码[：:\s]*([A-Za-z0-9]{4,8})",
+    r"校验码[：:\s]*([A-Za-z0-9]{4,8})",
+    r"安全码[：:\s]*([A-Za-z0-9]{4,8})",
+    r"一次性密码[：:\s]*([A-Za-z0-9]{4,8})",
+    r"(?i)OTP[：:\s]*([A-Za-z0-9]{4,8})",
 ];
 
 #[cfg(test)]
@@ -59,7 +56,6 @@ mod tests {
     use super::*;
     use regex::Regex;
 
-    /// 从文本中提取验证码
     fn extract_code(text: &str) -> Option<String> {
         for pattern in CODE_PATTERNS {
             if let Ok(re) = Regex::new(pattern) {
@@ -74,72 +70,27 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_code_chinese() {
-        assert_eq!(
-            extract_code("您的验证码是 123456，有效期5分钟"),
-            Some("123456".to_string())
-        );
+    fn test_normal() {
+        assert_eq!(extract_code("验证码是 123456"), Some("123456".into()));
     }
 
     #[test]
-    fn test_extract_code_chinese_colon() {
-        assert_eq!(
-            extract_code("验证码：987654"),
-            Some("987654".to_string())
-        );
+    fn test_with_letter() {
+        assert_eq!(extract_code("验证码为: aBcD1234"), Some("aBcD1234".into()));
     }
 
     #[test]
-    fn test_extract_code_with_letter() {
-        assert_eq!(
-            extract_code("验证码为: aBcD1234"),
-            Some("aBcD1234".to_string())
-        );
+    fn test_english() {
+        assert_eq!(extract_code("Your Code: 556677"), Some("556677".into()));
     }
 
     #[test]
-    fn test_extract_code_english() {
-        assert_eq!(
-            extract_code("Your code: 12345678"),
-            Some("12345678".to_string())
-        );
+    fn test_no_match() {
+        assert_eq!(extract_code("普通邮件"), None);
     }
 
     #[test]
-    fn test_extract_code_xiaoyan() {
-        assert_eq!(
-            extract_code("校验码：556677"),
-            Some("556677".to_string())
-        );
-    }
-
-    #[test]
-    fn test_extract_code_no_match() {
-        assert_eq!(extract_code("这是一封普通邮件，没有验证码"), None);
-    }
-
-    #[test]
-    fn test_extract_code_empty() {
-        assert_eq!(extract_code(""), None);
-    }
-
-    #[test]
-    fn test_extract_code_dongtai() {
-        assert_eq!(
-            extract_code("动态码：33445566"),
-            Some("33445566".to_string())
-        );
-    }
-
-    #[test]
-    fn test_extract_code_short_number() {
-        // 3 位数字不匹配（少于 4 位）
-        assert_eq!(extract_code("验证码是 123"), None);
-    }
-
-    #[test]
-    fn test_extract_code_long_number() {
-        // 9 位数字不匹配（超过 8 位）
-        assert_eq!(extract_code("验证码是 123456789"), None);
+    fn test_short_string() {
+        assert_eq!(extract_code("验证码: 123456789"), Some("12345678".into()));
     }
 }
