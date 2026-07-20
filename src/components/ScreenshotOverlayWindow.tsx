@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 截图覆盖窗口入口
  *
  * 加载后 emit screenshot:ready，后端再推图并 show。
