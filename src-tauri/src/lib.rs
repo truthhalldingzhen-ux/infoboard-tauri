@@ -100,9 +100,11 @@ pub fn run() {
             plugins::niutrans::niutrans_get_char_count,
             // Issue 14: 截图
             plugins::screenshot::screenshot_start,
+            plugins::screenshot::screenshot_capture_only,
             plugins::screenshot::screenshot_get_image,
             plugins::screenshot::screenshot_confirm,
             plugins::screenshot::screenshot_cancel,
+            plugins::screenshot::screenshot_close_overlay,
             // Issue 15: OCR
             plugins::ocr::ocr_recognize,
             plugins::ocr::ocr_is_ready,

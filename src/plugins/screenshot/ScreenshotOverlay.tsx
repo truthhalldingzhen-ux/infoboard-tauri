@@ -2,9 +2,9 @@
  * 截图覆盖层组件
  *
  * 工作流程：
- * 1. 挂载时调用后端 PowerShell 截全屏 → 显示覆盖层
+ * 1. 覆盖窗收到 initialImage（xcap 原生截图）→ 显示覆盖层
  * 2. 用户框选区域 → 选区内显示原图（无遮罩）
- * 3. 确认 → Canvas 裁剪选区 → 写入系统剪贴板
+ * 3. 确认 → Canvas 裁剪 → 剪贴板 + 关闭覆盖窗
  * 4. 可选：识别文字（OCR）
  */
 
@@ -121,7 +121,7 @@ export function ScreenshotOverlay({ onClose, initialImage }: ScreenshotOverlayPr
     let cancelled = false
     const load = async () => {
       try {
-        const dataUrl = await screenshotBridge.capture()
+        const dataUrl = await screenshotBridge.captureOnly()
         if (!cancelled) {
           setScreenImage(dataUrl)
           setState('idle')
@@ -184,8 +184,8 @@ export function ScreenshotOverlay({ onClose, initialImage }: ScreenshotOverlayPr
         await screenshotBridge.confirm(dataUrl)
         return
       }
-      // 浏览器剪贴板成功 → 仍需调用后端关闭覆盖窗口
-      await screenshotBridge.cancel()
+      // 浏览器剪贴板成功 → 仅关闭覆盖窗（语义上不是 cancel）
+      await screenshotBridge.closeOverlay()
 
       onClose()
     } catch (err) {

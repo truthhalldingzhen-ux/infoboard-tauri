@@ -1,28 +1,35 @@
 ﻿//! 截图模块 — Tauri 后端
 //!
-//! 修复全屏白屏：
-//! - 不在启动时预创建覆盖窗
-//! - 点击截图后再创建（默认 hidden）
-//! - xcap 原生截图
-//! - 先推图再 show
+//! 对齐 QQ 体验的修复版：
+//! 1. xcap 原生截图（优先主显示器）
+//! 2. 按需创建覆盖窗（默认 hidden），前端 ready 后再推图并 show
+//! 3. close_overlay 统一关窗，与 cancel 语义分离
 
 use std::sync::Mutex;
+use std::time::Duration;
 use base64::{engine::general_purpose, Engine as _};
 use tauri::webview::WebviewWindowBuilder;
-use tauri::{AppHandle, Emitter, Manager, WebviewUrl};
+use tauri::{AppHandle, Emitter, Listener, Manager, WebviewUrl};
 
 static CAPTURED: Mutex<Option<String>> = Mutex::new(None);
 const OVERLAY_LABEL: &str = "screenshot-overlay";
 
-/// 兼容旧调用：空实现，绝不在启动时建全屏窗
+/// 兼容旧调用：空实现
 pub fn setup_screenshot(_app: &AppHandle) {}
 
+/// 优先主显示器，否则第一个
 fn capture_screen_native() -> Result<String, String> {
     let monitors = xcap::Monitor::all().map_err(|e| format!("枚举显示器失败: {}", e))?;
+    if monitors.is_empty() {
+        return Err("未找到显示器".into());
+    }
+
     let monitor = monitors
-        .into_iter()
-        .next()
+        .iter()
+        .find(|m| m.is_primary().unwrap_or(false))
+        .or_else(|| monitors.first())
         .ok_or_else(|| "未找到显示器".to_string())?;
+
     let image = monitor
         .capture_image()
         .map_err(|e| format!("截图失败: {}", e))?;
@@ -40,21 +47,29 @@ fn capture_screen_native() -> Result<String, String> {
     ))
 }
 
+/// 仅截图，不建窗（供内部/测试；前端勿与 start 混用）
+#[tauri::command]
+pub async fn screenshot_capture_only() -> Result<String, String> {
+    tokio::task::spawn_blocking(capture_screen_native)
+        .await
+        .map_err(|e| format!("截图任务失败: {}", e))?
+}
+
 #[tauri::command]
 pub async fn screenshot_start(app: AppHandle) -> Result<(), String> {
-    // 先截图
+    // 1) 截图
     let data_url = tokio::task::spawn_blocking(capture_screen_native)
         .await
         .map_err(|e| format!("截图任务失败: {}", e))??;
     *CAPTURED.lock().unwrap() = Some(data_url.clone());
 
-    // 关闭旧覆盖窗（若有）
+    // 2) 关掉旧覆盖窗
     if let Some(old) = app.get_webview_window(OVERLAY_LABEL) {
         let _ = old.close();
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        tokio::time::sleep(Duration::from_millis(30)).await;
     }
 
-    // 再创建覆盖窗（默认不可见）
+    // 3) 创建覆盖窗（hidden）
     let overlay = WebviewWindowBuilder::new(
         &app,
         OVERLAY_LABEL,
@@ -71,13 +86,33 @@ pub async fn screenshot_start(app: AppHandle) -> Result<(), String> {
     .build()
     .map_err(|e| format!("创建覆盖窗口失败: {}", e))?;
 
-    // 推送图片
+    // 4) 等待前端 screenshot:ready（最多 3s），避免 emit 丢失
+    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<()>();
+    let ready_tx = std::sync::Mutex::new(Some(ready_tx));
+    let app_for_listen = app.clone();
+    let id = app_for_listen.listen("screenshot:ready", move |_event| {
+        if let Ok(mut g) = ready_tx.lock() {
+            if let Some(tx) = g.take() {
+                let _ = tx.send(());
+            }
+        }
+    });
+
+    let ready = tokio::time::timeout(Duration::from_secs(3), ready_rx).await;
+    app.unlisten(id);
+
+    // 无论是否收到 ready，都推图 + 兜底 get_image
     overlay
         .emit("screenshot:data", &data_url)
         .map_err(|e| format!("推送截图失败: {}", e))?;
 
-    // 等前端加载/渲染
-    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+    if ready.is_err() {
+        log::warn!("[截图] 未收到 screenshot:ready，仍继续 show（依赖 get_image 兜底）");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    } else {
+        // 给 React 一帧 setState
+        tokio::time::sleep(Duration::from_millis(16)).await;
+    }
 
     overlay
         .show()
@@ -91,6 +126,7 @@ pub fn screenshot_get_image() -> Result<Option<String>, String> {
     Ok(CAPTURED.lock().unwrap().clone())
 }
 
+/// 确认：写剪贴板 + 关闭覆盖窗
 #[tauri::command]
 pub async fn screenshot_confirm(app: AppHandle, data_url: String) -> Result<(), String> {
     let base64_str = data_url
@@ -111,17 +147,25 @@ pub async fn screenshot_confirm(app: AppHandle, data_url: String) -> Result<(), 
     })
     .map_err(|e| format!("写入: {}", e))?;
 
-    cleanup(&app);
+    close_overlay_inner(&app);
     Ok(())
 }
 
+/// 取消截图（用户 Esc/取消按钮）
 #[tauri::command]
 pub async fn screenshot_cancel(app: AppHandle) -> Result<(), String> {
-    cleanup(&app);
+    close_overlay_inner(&app);
     Ok(())
 }
 
-fn cleanup(app: &AppHandle) {
+/// 仅关闭覆盖窗（浏览器剪贴板已成功时用，语义上不是 cancel）
+#[tauri::command]
+pub async fn screenshot_close_overlay(app: AppHandle) -> Result<(), String> {
+    close_overlay_inner(&app);
+    Ok(())
+}
+
+fn close_overlay_inner(app: &AppHandle) {
     *CAPTURED.lock().unwrap() = None;
     if let Some(overlay) = app.get_webview_window(OVERLAY_LABEL) {
         let _ = overlay.close();

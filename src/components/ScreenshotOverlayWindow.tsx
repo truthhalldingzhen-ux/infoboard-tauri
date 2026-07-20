@@ -1,14 +1,14 @@
 ﻿/**
  * 截图覆盖窗口入口
  *
- * 通过 URL 参数 overlay=screenshot 或窗口 label 识别。
- * 空闲时保持透明，不挡操作。
+ * 加载后 emit screenshot:ready，后端再推图并 show。
+ * 同时 listen screenshot:data + get_image 兜底。
  */
 
 import { useEffect, useState } from 'react'
 import { ScreenshotOverlay } from '../plugins/screenshot/ScreenshotOverlay'
 import { invoke } from '@tauri-apps/api/core'
-import { listen } from '@tauri-apps/api/event'
+import { emit, listen } from '@tauri-apps/api/event'
 
 export function ScreenshotOverlayWindow() {
   const [image, setImage] = useState<string | null>(null)
@@ -16,26 +16,32 @@ export function ScreenshotOverlayWindow() {
 
   useEffect(() => {
     let unlisten: (() => void) | undefined
+    let cancelled = false
 
-    listen<string>('screenshot:data', (event) => {
-      setImage(event.payload)
-      setError(null)
-    }).then((fn) => {
-      unlisten = fn
-    })
-
-    invoke<string | null>('screenshot_get_image')
-      .then((v) => {
-        if (v) setImage(v)
-      })
-      .catch((e) => setError(String(e)))
+    ;(async () => {
+      try {
+        unlisten = await listen<string>('screenshot:data', (event) => {
+          if (!cancelled) {
+            setImage(event.payload)
+            setError(null)
+          }
+        })
+        // 通知后端：监听已就绪
+        await emit('screenshot:ready')
+        // 兜底拉图
+        const v = await invoke<string | null>('screenshot_get_image')
+        if (!cancelled && v) setImage(v)
+      } catch (e) {
+        if (!cancelled) setError(String(e))
+      }
+    })()
 
     return () => {
+      cancelled = true
       unlisten?.()
     }
   }, [])
 
-  // 空闲：全透明，避免白底挡桌面
   if (!image && !error) {
     return <div className="fixed inset-0" style={{ background: 'transparent' }} />
   }

@@ -1,23 +1,24 @@
 ﻿//! OCR 文字识别 — Tauri 后端
 //!
-//! 复刻 Electron `electron/ocr.ts` 的协议：
-//! 1. 启动 RapidOCR-json.exe（cwd = 引擎目录，加载 models）
-//! 2. 等待 stdout 出现 "init completed"
-//! 3. 写入一行 JSON: {"image_base64":"..."}
-//! 4. 读取一行 JSON 响应 { code, data }
-//!
-//! 注意：必须等 init 完成后再写 stdin，否则引擎忽略请求或无响应。
+//! 对齐 Electron ocr.ts：
+//! - 长驻 RapidOCR-json 子进程 + 串行请求队列
+//! - 等待 init completed
+//! - 响应 recv_timeout 真超时（避免 read_line 永久阻塞）
+//! - Drop 时 kill 子进程
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
-use std::sync::Mutex;
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-// ─── 类型 ───
+const OCR_TIMEOUT: Duration = Duration::from_secs(20);
+const INIT_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OcrResponse {
@@ -25,19 +26,305 @@ pub struct OcrResponse {
     pub data: Value,
 }
 
+struct PendingRequest {
+    image_base64: String,
+    tx: Sender<Result<OcrResponse, String>>,
+}
+
+struct EngineState {
+    process: Option<Child>,
+    ready: bool,
+}
+
+/// 可跨线程共享的引擎句柄（manage 到 Tauri State）
 pub struct OcrEngine {
-    engine_path: Mutex<PathBuf>,
+    engine_path: PathBuf,
+    state: Arc<Mutex<EngineState>>,
+    req_tx: Mutex<Option<Sender<PendingRequest>>>,
 }
 
 impl OcrEngine {
     pub fn new() -> Self {
         Self {
-            engine_path: Mutex::new(get_engine_path()),
+            engine_path: get_engine_path(),
+            state: Arc::new(Mutex::new(EngineState {
+                process: None,
+                ready: false,
+            })),
+            req_tx: Mutex::new(None),
         }
     }
 
-    fn path(&self) -> PathBuf {
-        self.engine_path.lock().unwrap().clone()
+    pub fn path(&self) -> &PathBuf {
+        &self.engine_path
+    }
+
+    pub fn is_engine_ready(&self) -> bool {
+        self.state.lock().unwrap().ready
+    }
+
+    fn shutdown_locked(state: &mut EngineState, req_tx: &mut Option<Sender<PendingRequest>>) {
+        *req_tx = None;
+        state.ready = false;
+        if let Some(mut p) = state.process.take() {
+            let _ = p.kill();
+            let _ = p.wait();
+        }
+    }
+
+    pub fn shutdown(&self) {
+        let mut state = self.state.lock().unwrap();
+        let mut req_tx = self.req_tx.lock().unwrap();
+        Self::shutdown_locked(&mut state, &mut req_tx);
+    }
+
+    /// 启动进程与读写线程，并阻塞等待 init completed（有截止时间）
+    fn ensure_started(&self) -> Result<(), String> {
+        {
+            let state = self.state.lock().unwrap();
+            let has_tx = self.req_tx.lock().unwrap().is_some();
+            if state.process.is_some() && state.ready && has_tx {
+                return Ok(());
+            }
+            // 进程在但未 ready / 通道丢了 → 重建
+            if state.process.is_some() && (!state.ready || !has_tx) {
+                drop(state);
+                self.shutdown();
+            }
+        }
+
+        if !self.engine_path.exists() {
+            return Err(format!(
+                "OCR 引擎未找到: {}。请将 RapidOCR-json.exe 及 models 放到 src-tauri/binaries/rapidocr/",
+                self.engine_path.display()
+            ));
+        }
+
+        let engine_dir = self
+            .engine_path
+            .parent()
+            .ok_or_else(|| "引擎路径无效".to_string())?;
+
+        let mut child = Command::new(&self.engine_path)
+            .current_dir(engine_dir)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("启动 OCR 引擎失败: {}", e))?;
+
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| "无法获取子进程 stdin".to_string())?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| "无法获取子进程 stdout".to_string())?;
+
+        let (req_tx, req_rx) = mpsc::channel::<PendingRequest>();
+        let (line_tx, line_rx) = mpsc::channel::<Result<String, String>>();
+
+        // 读线程
+        let state_r = Arc::clone(&self.state);
+        thread::Builder::new()
+            .name("ocr-stdout".into())
+            .spawn(move || {
+                let mut reader = BufReader::new(stdout);
+                let mut buf = String::new();
+                loop {
+                    buf.clear();
+                    match reader.read_line(&mut buf) {
+                        Ok(0) => {
+                            let _ = line_tx.send(Err("OCR 进程 stdout 已关闭".into()));
+                            break;
+                        }
+                        Ok(_) => {
+                            let trimmed = buf.trim();
+                            if trimmed.is_empty() {
+                                continue;
+                            }
+                            if trimmed.contains("init completed") {
+                                if let Ok(mut st) = state_r.lock() {
+                                    st.ready = true;
+                                }
+                                log::info!("[OCR] 引擎初始化完成");
+                                continue;
+                            }
+                            if line_tx.send(Ok(trimmed.to_string())).is_err() {
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            let _ = line_tx.send(Err(format!("读取 OCR stdout 失败: {}", e)));
+                            break;
+                        }
+                    }
+                }
+                if let Ok(mut st) = state_r.lock() {
+                    st.ready = false;
+                    if let Some(mut p) = st.process.take() {
+                        let _ = p.kill();
+                        let _ = p.wait();
+                    }
+                }
+            })
+            .map_err(|e| format!("启动 OCR 读线程失败: {}", e))?;
+
+        // 写/调度线程
+        let state_w = Arc::clone(&self.state);
+        thread::Builder::new()
+            .name("ocr-worker".into())
+            .spawn(move || worker_loop(stdin, req_rx, line_rx, state_w))
+            .map_err(|e| format!("启动 OCR 写线程失败: {}", e))?;
+
+        {
+            let mut state = self.state.lock().unwrap();
+            state.process = Some(child);
+            state.ready = false;
+        }
+        *self.req_tx.lock().unwrap() = Some(req_tx);
+
+        // 等 init（轮询 ready，不阻塞在 read_line）
+        let deadline = Instant::now() + INIT_TIMEOUT;
+        while Instant::now() < deadline {
+            {
+                let st = self.state.lock().unwrap();
+                if st.ready {
+                    return Ok(());
+                }
+                if st.process.is_none() {
+                    return Err("OCR 进程启动后意外退出".into());
+                }
+            }
+            thread::sleep(Duration::from_millis(40));
+        }
+        self.shutdown();
+        Err("OCR 引擎初始化超时（30s），请检查 models 目录是否完整".into())
+    }
+
+    /// 识别一次（真超时）
+    pub fn recognize(&self, image_base64: String) -> Result<OcrResponse, String> {
+        self.ensure_started()?;
+
+        let req_tx = self
+            .req_tx
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or_else(|| "OCR 请求通道未就绪".to_string())?;
+
+        let (tx, rx) = mpsc::channel();
+        if req_tx
+            .send(PendingRequest {
+                image_base64,
+                tx,
+            })
+            .is_err()
+        {
+            self.shutdown();
+            return Err("OCR 请求通道已关闭，引擎可能已崩溃".into());
+        }
+
+        match rx.recv_timeout(OCR_TIMEOUT) {
+            Ok(r) => r,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                self.shutdown();
+                Err("OCR 识别超时（20s）".into())
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                self.shutdown();
+                Err("OCR 响应通道断开".into())
+            }
+        }
+    }
+}
+
+impl Drop for OcrEngine {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
+fn worker_loop(
+    mut stdin: ChildStdin,
+    req_rx: Receiver<PendingRequest>,
+    line_rx: Receiver<Result<String, String>>,
+    state: Arc<Mutex<EngineState>>,
+) {
+    for req in req_rx {
+        // 确保 ready
+        if !state.lock().map(|s| s.ready).unwrap_or(false) {
+            let _ = req
+                .tx
+                .send(Err("OCR 引擎未就绪".into()));
+            continue;
+        }
+
+        let payload = serde_json::json!({ "image_base64": req.image_base64 }).to_string();
+        if let Err(e) = writeln!(stdin, "{}", payload).and_then(|_| stdin.flush()) {
+            let _ = req.tx.send(Err(format!("写入 stdin 失败: {}", e)));
+            if let Ok(mut st) = state.lock() {
+                st.ready = false;
+            }
+            break;
+        }
+
+        let deadline = Instant::now() + OCR_TIMEOUT;
+        let mut answered = false;
+        while Instant::now() < deadline {
+            let remain = deadline.saturating_duration_since(Instant::now());
+            match line_rx.recv_timeout(remain) {
+                Ok(Ok(line)) => {
+                    if line.contains("init completed") || line.is_empty() {
+                        continue;
+                    }
+                    if !line.starts_with('{') {
+                        log::info!("[OCR] 非 JSON: {}", &line[..line.len().min(200)]);
+                        continue;
+                    }
+                    match serde_json::from_str::<OcrResponse>(&line) {
+                        Ok(resp) => {
+                            let _ = req.tx.send(Ok(resp));
+                            answered = true;
+                            break;
+                        }
+                        Err(e) => {
+                            log::warn!("[OCR] JSON 解析失败: {} raw={:.200}", e, line);
+                        }
+                    }
+                }
+                Ok(Err(e)) => {
+                    let _ = req.tx.send(Err(e));
+                    answered = true;
+                    if let Ok(mut st) = state.lock() {
+                        st.ready = false;
+                    }
+                    break;
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => break,
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    let _ = req.tx.send(Err("OCR 读线程已退出".into()));
+                    answered = true;
+                    if let Ok(mut st) = state.lock() {
+                        st.ready = false;
+                    }
+                    break;
+                }
+            }
+        }
+
+        if !answered {
+            let _ = req.tx.send(Err("OCR 识别超时（20s）".into()));
+            if let Ok(mut st) = state.lock() {
+                st.ready = false;
+                if let Some(mut p) = st.process.take() {
+                    let _ = p.kill();
+                    let _ = p.wait();
+                }
+            }
+            break;
+        }
     }
 }
 
@@ -62,172 +349,17 @@ fn get_engine_path() -> PathBuf {
     dev
 }
 
-/// 同步执行一次 OCR（在 spawn_blocking 中调用）
-fn recognize_once(engine_path: &PathBuf, image_base64: &str) -> Result<OcrResponse, String> {
-    if !engine_path.exists() {
-        return Err(format!(
-            "OCR 引擎未找到: {}。请将 RapidOCR-json.exe 及 models 放到 src-tauri/binaries/rapidocr/",
-            engine_path.display()
-        ));
-    }
+// ─── Commands ───
 
-    let engine_dir = engine_path
-        .parent()
-        .ok_or_else(|| "引擎路径无效".to_string())?;
-
-    let mut child = Command::new(engine_path)
-        .current_dir(engine_dir)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("启动 OCR 引擎失败: {}", e))?;
-
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "无法获取子进程 stdout".to_string())?;
-    let mut stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| "无法获取子进程 stdin".to_string())?;
-
-    let mut reader = BufReader::new(stdout);
-    let mut line = String::new();
-
-    // 1) 等待 init completed（模型加载，最长 30s）
-    let init_deadline = Instant::now() + Duration::from_secs(30);
-    let mut inited = false;
-    while Instant::now() < init_deadline {
-        line.clear();
-        match reader.read_line(&mut line) {
-            Ok(0) => break, // EOF
-            Ok(_) => {
-                let trimmed = line.trim();
-                if trimmed.is_empty() {
-                    continue;
-                }
-                log::info!("[OCR] stdout: {}", &trimmed[..trimmed.len().min(200)]);
-                if trimmed.contains("init completed") {
-                    inited = true;
-                    break;
-                }
-                // 有的版本 init 后直接可收 JSON，若先收到 { 也继续
-                if trimmed.starts_with('{') {
-                    // 意外：未 init 就收到 JSON，仍尝试解析
-                    if let Ok(resp) = serde_json::from_str::<OcrResponse>(trimmed) {
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        return Ok(resp);
-                    }
-                }
-            }
-            Err(e) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(format!("读取 OCR stdout 失败: {}", e));
-            }
-        }
-    }
-
-    if !inited {
-        let _ = child.kill();
-        let _ = child.wait();
-        return Err("OCR 引擎初始化超时（30s），请检查 models 目录是否完整".to_string());
-    }
-
-    // 2) 发送请求（JSON Lines，一行一个请求）
-    let request = serde_json::json!({ "image_base64": image_base64 }).to_string();
-    writeln!(stdin, "{}", request).map_err(|e| format!("写入 stdin 失败: {}", e))?;
-    stdin
-        .flush()
-        .map_err(|e| format!("刷新 stdin 失败: {}", e))?;
-    // 保持 stdin 打开直到读完响应；部分引擎在 stdin 关闭后立即退出
-    // 读完后再 drop
-
-    // 3) 读取 JSON 响应（最长 20s）
-    let resp_deadline = Instant::now() + Duration::from_secs(20);
-    while Instant::now() < resp_deadline {
-        line.clear();
-        match reader.read_line(&mut line) {
-            Ok(0) => break,
-            Ok(_) => {
-                let trimmed = line.trim();
-                if trimmed.is_empty() {
-                    continue;
-                }
-                if trimmed.contains("init completed") {
-                    continue;
-                }
-                if trimmed.starts_with('{') {
-                    match serde_json::from_str::<OcrResponse>(trimmed) {
-                        Ok(resp) => {
-                            drop(stdin);
-                            let _ = child.kill();
-                            let _ = child.wait();
-                            return Ok(resp);
-                        }
-                        Err(e) => {
-                            log::warn!(
-                                "[OCR] JSON 解析失败: {} raw={:.200}",
-                                e,
-                                trimmed
-                            );
-                        }
-                    }
-                } else {
-                    log::info!("[OCR] 非 JSON 输出: {}", &trimmed[..trimmed.len().min(200)]);
-                }
-            }
-            Err(e) => {
-                drop(stdin);
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(format!("读取 OCR 响应失败: {}", e));
-            }
-        }
-    }
-
-    drop(stdin);
-    // 附带 stderr 便于诊断
-    let mut stderr_msg = String::new();
-    if let Some(mut err) = child.stderr.take() {
-        use std::io::Read;
-        let mut buf = String::new();
-        let _ = err.read_to_string(&mut buf);
-        stderr_msg = buf;
-    }
-    let _ = child.kill();
-    let _ = child.wait();
-
-    if stderr_msg.trim().is_empty() {
-        Err("未收到有效的 OCR 响应（超时）".to_string())
-    } else {
-        Err(format!(
-            "未收到有效的 OCR 响应。stderr: {}",
-            stderr_msg.trim().chars().take(300).collect::<String>()
-        ))
-    }
-}
-
-// ─── Tauri Commands ───
-
-/// OCR 识别
-///
-/// 前端传入纯 base64（不含 data: 前缀），参数名 imageBase64（Tauri 会映射到 image_base64）
 #[tauri::command]
 pub async fn ocr_recognize(
     state: tauri::State<'_, OcrEngine>,
     image_base64: String,
 ) -> Result<Value, String> {
     if image_base64.is_empty() {
-        return Ok(serde_json::json!({
-            "code": 299,
-            "data": "图片数据为空"
-        }));
+        return Ok(serde_json::json!({ "code": 299, "data": "图片数据为空" }));
     }
 
-    // 兼容误传完整 data URL
     let image_base64 = image_base64
         .split(',')
         .last()
@@ -241,16 +373,14 @@ pub async fn ocr_recognize(
         }));
     }
 
-    let engine_path = state.path();
     log::info!(
         "[OCR] 开始识别 base64_len={} engine={}",
         image_base64.len(),
-        engine_path.display()
+        state.path().display()
     );
 
-    let result = tokio::task::spawn_blocking(move || recognize_once(&engine_path, &image_base64))
-        .await
-        .map_err(|e| format!("OCR 任务失败: {}", e))?;
+    // 内部已有队列与 recv_timeout
+    let result = state.recognize(image_base64);
 
     match result {
         Ok(resp) => {
@@ -261,10 +391,7 @@ pub async fn ocr_recognize(
         }
         Err(e) => {
             log::error!("[OCR] 失败: {}", e);
-            Ok(serde_json::json!({
-                "code": 299,
-                "data": e
-            }))
+            Ok(serde_json::json!({ "code": 299, "data": e }))
         }
     }
 }
@@ -276,10 +403,10 @@ pub async fn ocr_is_ready(state: tauri::State<'_, OcrEngine>) -> Result<bool, St
 
 #[tauri::command]
 pub async fn ocr_engine_status(state: tauri::State<'_, OcrEngine>) -> Result<Value, String> {
-    let path = state.path();
     Ok(serde_json::json!({
-        "ready": path.exists(),
-        "engine_path": path.to_string_lossy(),
+        "ready": state.path().exists(),
+        "engine_ready": state.is_engine_ready(),
+        "engine_path": state.path().to_string_lossy(),
     }))
 }
 
