@@ -10,6 +10,7 @@
 import { useState, useCallback } from 'react'
 import { usePlugins } from '../core/PluginHost'
 import { ToolExpandPanel } from './ToolExpandPanel'
+import { invoke } from '@tauri-apps/api/core'
 import type { InfoBoardPlugin, PluginManifest } from '../core/types'
 
 /** Lucide SVG 图标注册表（常用工具图标） */
@@ -63,7 +64,7 @@ export function ToolSection() {
    */
   const togglePlugin = useCallback((pluginId: string) => {
     if (pluginId === 'screenshot') {
-      window.electronAPI?.startScreenshot()
+      invoke('screenshot_start').catch((e) => console.error('[截图] 启动失败:', e))
       return
     }
     setExpandedPluginId((prev) => (prev === pluginId ? null : pluginId))

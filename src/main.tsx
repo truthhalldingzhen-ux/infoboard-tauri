@@ -3,9 +3,9 @@ import ReactDOM from 'react-dom/client'
 import App from './App'
 import GlobalToast from './core/GlobalToast'
 import { initTauriShim } from './tauri-shim'
+import { ScreenshotOverlayWindow } from './components/ScreenshotOverlayWindow'
 import './styles/globals.css'
 
-// 初始化 Tauri IPC 适配层
 initTauriShim()
 
 function Root() {
@@ -17,7 +17,6 @@ function Root() {
     return () => window.removeEventListener('toggle-titlebar', handler)
   }, [])
 
-  // F12 打开 DevTools
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'F12') {
@@ -29,6 +28,10 @@ function Root() {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
+
+  if (window.location.hash.startsWith('#/screenshot')) {
+    return <ScreenshotOverlayWindow />
+  }
 
   return (
     <div className={titleBarVisible ? '' : 'titlebar-hidden'}>

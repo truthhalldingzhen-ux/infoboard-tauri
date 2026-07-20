@@ -23,11 +23,12 @@ type OverlayState = 'loading' | 'idle' | 'selecting' | 'selected'
 
 interface ScreenshotOverlayProps {
   onClose: () => void
+  initialImage?: string
 }
 
-export function ScreenshotOverlay({ onClose }: ScreenshotOverlayProps) {
-  const [screenImage, setScreenImage] = useState<string | null>(null)
-  const [state, setState] = useState<OverlayState>('loading')
+export function ScreenshotOverlay({ onClose, initialImage }: ScreenshotOverlayProps) {
+  const [screenImage, setScreenImage] = useState<string | null>(initialImage ?? null)
+  const [state, setState] = useState<OverlayState>(initialImage ? 'idle' : 'loading')
   const [startPos, setStartPos] = useState({ x: 0, y: 0 })
   const [currentPos, setCurrentPos] = useState({ x: 0, y: 0 })
   const [selection, setSelection] = useState<SelectionRect | null>(null)
@@ -48,11 +49,14 @@ export function ScreenshotOverlay({ onClose }: ScreenshotOverlayProps) {
 
   // 取消
   const handleCancel = useCallback(() => {
-    screenshotBridge.cancelScreenshot().catch(() => {})
+    screenshotBridge.cancel().catch(() => {})
     setOcrText(null)
     setError(null)
     onClose()
   }, [onClose])
+
+  const handleCancelRef = useRef(handleCancel)
+  handleCancelRef.current = handleCancel
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
@@ -93,14 +97,14 @@ export function ScreenshotOverlay({ onClose }: ScreenshotOverlayProps) {
   // 键盘事件处理
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') handleCancel()
+      if (e.key === 'Escape') handleCancelRef.current()
       if (e.key === 'Enter' && state === 'selected') {
-        handleWriteClipboard()
+        handleWriteClipboardRef.current()
       }
     }
     const ctx = (e: MouseEvent) => {
       e.preventDefault()
-      handleCancel()
+      handleCancelRef.current()
     }
     window.addEventListener('keydown', handler)
     window.addEventListener('contextmenu', ctx)
@@ -108,13 +112,14 @@ export function ScreenshotOverlay({ onClose }: ScreenshotOverlayProps) {
       window.removeEventListener('keydown', handler)
       window.removeEventListener('contextmenu', ctx)
     }
-  }, [handleCancel, state])
+  }, [state])
 
-  // 挂载时截图
+  // 挂载时截图（仅当无 initialImage）
   useEffect(() => {
-    let cancelled = false
+    if (initialImage) return
 
-    const loadScreenshot = async () => {
+    let cancelled = false
+    const load = async () => {
       try {
         const dataUrl = await screenshotBridge.capture()
         if (!cancelled) {
@@ -128,13 +133,11 @@ export function ScreenshotOverlay({ onClose }: ScreenshotOverlayProps) {
         }
       }
     }
-
-    loadScreenshot()
-
+    load()
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [initialImage])
 
   // 裁剪选区并写入剪贴板
   const handleWriteClipboard = useCallback(async () => {
@@ -174,18 +177,15 @@ export function ScreenshotOverlay({ onClose }: ScreenshotOverlayProps) {
 
       // 先尝试用 navigator.clipboard.write()（浏览器 API）
       try {
-        await navigator.clipboard.write([
-          new ClipboardItem({
-            'image/png': blob,
-          }),
-        ])
-        console.log('[截图] 图片已写入剪贴板')
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
       } catch {
-        // 降级：通过后端写入剪贴板
+        // 降级：通过后端写入剪贴板（含关闭覆盖窗口）
         const dataUrl = canvas.toDataURL('image/png')
-        await screenshotBridge.confirmScreenshot(dataUrl)
-        console.log('[截图] 通过后端写入剪贴板')
+        await screenshotBridge.confirm(dataUrl)
+        return
       }
+      // 浏览器剪贴板成功 → 仍需调用后端关闭覆盖窗口
+      await screenshotBridge.cancel()
 
       onClose()
     } catch (err) {
@@ -193,6 +193,9 @@ export function ScreenshotOverlay({ onClose }: ScreenshotOverlayProps) {
       setError(String(err))
     }
   }, [selection, screenImage, onClose])
+
+  const handleWriteClipboardRef = useRef(handleWriteClipboard)
+  handleWriteClipboardRef.current = handleWriteClipboard
 
   // OCR 识别
   const handleOcr = useCallback(async () => {

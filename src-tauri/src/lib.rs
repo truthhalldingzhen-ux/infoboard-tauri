@@ -62,7 +62,7 @@ pub fn run() {
             core::tray::setup_tray(app.handle())?;
             // 恢复上次关闭时的窗口大小和位置
             if let Some(window) = app.get_webview_window("main") {
-                let _ = window.restore_state(StateFlags::all());
+                let _ = window.restore_state(StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED);
             }
             // 注册全局快捷键 Ctrl+Shift+I
             {
@@ -99,7 +99,8 @@ pub fn run() {
             plugins::niutrans::niutrans_get_config,
             plugins::niutrans::niutrans_get_char_count,
             // Issue 14: 截图
-            plugins::screenshot::screenshot_capture,
+            plugins::screenshot::screenshot_start,
+            plugins::screenshot::screenshot_get_image,
             plugins::screenshot::screenshot_confirm,
             plugins::screenshot::screenshot_cancel,
             // Issue 15: OCR

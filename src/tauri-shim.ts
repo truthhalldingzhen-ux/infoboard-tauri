@@ -18,11 +18,13 @@ export function initTauriShim() {
     titleBarVisible: async () => true,
     setAutoStart: (enabled: boolean) => autostart.setEnabled(enabled).then(() => true),
     getAutoStart: () => autostart.isEnabled(),
-    startScreenshot: () => invoke('screenshot_capture'),
+    startScreenshot: () => invoke('screenshot_start'),
     confirmScreenshot: (dataUrl: string) => invoke('screenshot_confirm', { dataUrl }),
     cancelScreenshot: () => invoke('screenshot_cancel'),
     onScreenData: (cb: (dataUrl: string) => void) => {
-      invoke('screenshot_capture').then((v) => cb(v as string))
+      invoke('screenshot_get_image').then((v) => {
+        if (typeof v === 'string') cb(v)
+      })
     },
     ocrRecognize: async (imageBase64: string) => invoke('ocr_recognize', { imageBase64 }),
   }
