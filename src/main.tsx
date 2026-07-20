@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+﻿import React, { useState, useEffect } from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
 import GlobalToast from './core/GlobalToast'
@@ -10,6 +10,8 @@ initTauriShim()
 
 function Root() {
   const [titleBarVisible, setTitleBarVisible] = useState(true)
+  // 仅用 hash 识别覆盖窗，避免主窗口被误判
+  const isOverlay = window.location.hash.startsWith('#/screenshot')
 
   useEffect(() => {
     const handler = () => setTitleBarVisible((v) => !v)
@@ -29,7 +31,7 @@ function Root() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
 
-  if (window.location.hash.startsWith('#/screenshot')) {
+  if (isOverlay) {
     return <ScreenshotOverlayWindow />
   }
 

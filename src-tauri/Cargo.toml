@@ -32,6 +32,7 @@ md-5 = "0.10"
 
 # Issue 14: 截图插件
 image = "0.25"
+xcap = "0.4"
 arboard = "3"
 base64 = "0.22"
 
