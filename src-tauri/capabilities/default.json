@@ -1,10 +1,15 @@
 {
   "identifier": "default",
-  "description": "默认权限集 - 允许所有核心命令",
-  "windows": ["main"],
+  "description": "Default capability for main and screenshot-overlay windows",
+  "windows": ["main", "screenshot-overlay"],
   "permissions": [
     "core:default",
+    "core:event:default",
     "core:webview:allow-internal-toggle-devtools",
+    "core:window:allow-close",
+    "core:window:allow-hide",
+    "core:window:allow-show",
+    "core:window:allow-set-focus",
     "store:default",
     "window-state:default"
   ]
