@@ -16,7 +16,7 @@ import { THEME_PREVIEWS } from './types'
 import * as autostart from '../../core/autostart-bridge'
 import * as niutrans from '../translate/bridge'
 import * as mailBridge from '../dynamic-island/mail-bridge'
-import type { MailConfig } from '../dynamic-island/mail-bridge'
+import type { MailConfig, MailConfigPublic } from '../dynamic-island/mail-bridge'
 
 /**
  * 设置面板
@@ -24,7 +24,7 @@ import type { MailConfig } from '../dynamic-island/mail-bridge'
 export function SettingsPanel() {
   const { settings, updateSettings, togglePlugin } = useSettings()
   const [autoStart, setAutoStart] = useState(false)
-  const [mailAccounts, setMailAccounts] = useState<MailConfig[]>([])
+  const [mailAccounts, setMailAccounts] = useState<MailConfigPublic[]>([])
   const [newMail, setNewMail] = useState<MailConfig>({
     host: 'imap.gmail.com',
     port: 993,
@@ -275,7 +275,14 @@ export function SettingsPanel() {
                     border: '1px solid var(--border-subtle)',
                   }}
                 >
-                  <span style={{ color: 'var(--text-primary)' }}>{acc.user}</span>
+                  <span style={{ color: 'var(--text-primary)' }}>
+                    {acc.user}
+                    {acc.hasPass ? (
+                      <span className="ml-1.5 text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                        · 已保存凭据
+                      </span>
+                    ) : null}
+                  </span>
                   <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
                     {acc.host}:{acc.port}
                   </span>

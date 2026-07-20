@@ -459,8 +459,8 @@ function RefreshCookieButton() {
     try {
       const mtimeBefore = await window.opencodeDB.getCookieMtime()
       const result = await window.opencodeDB.refreshCookie()
-      if (!result.started) {
-        setState({ kind: 'error', message: result.message || '启动失败' })
+      if (!result?.started) {
+        setState({ kind: 'error', message: result?.message || '启动失败' })
         clearLater(8000)
         return
       }

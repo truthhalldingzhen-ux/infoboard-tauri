@@ -26,7 +26,8 @@ export function InfoSection() {
     const cleanup = eventBus.on(
       'island:visibility',
       (event) => {
-        const visible = (event.payload as any)?.visible ?? false
+        const payload = event.payload as { visible?: boolean } | undefined
+        const visible = payload?.visible ?? false
         setIslandVisible(visible)
       },
       'InfoSection'
@@ -91,7 +92,6 @@ export function InfoSection() {
                   <InfoCard
                     plugin={plugin}
                     isExpanded={expandedPluginId === plugin.manifest.id}
-                    hasExpanded={expandedPluginId !== null}
                     onToggle={() => togglePlugin(plugin.manifest.id)}
                   />
                 </div>
@@ -105,7 +105,6 @@ export function InfoSection() {
               key={plugin.manifest.id}
               plugin={plugin}
               isExpanded={expandedPluginId === plugin.manifest.id}
-              hasExpanded={expandedPluginId !== null}
               onToggle={() => togglePlugin(plugin.manifest.id)}
             />
           )
@@ -132,14 +131,13 @@ function SectionLabel() {
 interface InfoCardProps {
   plugin: InfoBoardPlugin
   isExpanded: boolean
-  hasExpanded: boolean
   onToggle: () => void
 }
 
 /**
  * 信息卡片组件
  */
-function InfoCard({ plugin, isExpanded, hasExpanded, onToggle }: InfoCardProps) {
+function InfoCard({ plugin, isExpanded, onToggle }: InfoCardProps) {
   const { Component, manifest } = plugin
   const isIsland = manifest.id === 'dynamic-island'
 

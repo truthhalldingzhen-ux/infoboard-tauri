@@ -48,14 +48,23 @@ export function useMediaControl(): UseMediaControlReturn {
   /** 保存 sendCommand 中 setTimeout 的引用，用于卸载时清理 */
   const commandTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  /** 上次日志签名，避免 2s 轮询刷屏 */
+  const lastLogKeyRef = useRef('')
+
   const fetchSession = useCallback(async () => {
     try {
       setError(null)
       const session = await getCurrentSession()
-      if (session) {
-        console.log(`[SMTC] 检测到媒体: "${session.title}" (${session.playbackStatus})`)
-      } else {
-        console.log('[SMTC] 无活跃媒体会话')
+      const logKey = session
+        ? `${session.title}|${session.playbackStatus}|${session.sourceAppId || ''}`
+        : '(none)'
+      if (logKey !== lastLogKeyRef.current) {
+        lastLogKeyRef.current = logKey
+        if (session) {
+          console.log(`[SMTC] 检测到媒体: "${session.title}" (${session.playbackStatus})`)
+        } else {
+          console.log('[SMTC] 无活跃媒体会话')
+        }
       }
 
       // 检测B站来源，自动补充封面和UP主信息

@@ -16,14 +16,17 @@ use types::*;
 const OPENCODE_URL: &str = "https://opencode.ai/workspace/wrk_01KTZNFM9S42BYDED8M1A393D4/go";
 const TIMEOUT_SECS: u64 = 15;
 
-/// 回退硬编码 Key（仅当环境变量和设置均未提供时使用）
-const MINIMAX_API_KEY_FALLBACK: &str = "sk-cp-REMOVED";
-
-fn get_minimax_api_key(api_key: Option<String>) -> String {
-    api_key
-        .filter(|k| !k.is_empty())
-        .or_else(|| std::env::var("MINIMAX_API_KEY").ok())
-        .unwrap_or_else(|| MINIMAX_API_KEY_FALLBACK.to_string())
+/// 解析 MiniMax API Key：参数优先，其次环境变量；无 key 则失败（禁止硬编码回退）
+fn get_minimax_api_key(api_key: Option<String>) -> Result<String, String> {
+    if let Some(k) = api_key.filter(|k| !k.is_empty()) {
+        return Ok(k);
+    }
+    match std::env::var("MINIMAX_API_KEY") {
+        Ok(k) if !k.is_empty() => Ok(k),
+        _ => Err(
+            "未配置 MiniMax API Key（请在设置中填写，或设置环境变量 MINIMAX_API_KEY）".into(),
+        ),
+    }
 }
 const MINIMAX_API_URL: &str = "https://www.minimaxi.com/v1/token_plan/remains";
 const MINIMAX_TIMEOUT_SECS: u64 = 10;
@@ -252,8 +255,8 @@ pub async fn opencode_get_sessions() -> Result<Vec<SessionInfo>, String> {
 
 #[tauri::command]
 pub async fn opencode_get_minimax(api_key: Option<String>) -> Result<MiniMaxUsage, String> {
-    let has_key = api_key.as_ref().map(|k| !k.is_empty()).unwrap_or(false);
-    println!("[OpenCode] MiniMax 查询开始 (有 API Key: {})", has_key);
+    let key = get_minimax_api_key(api_key)?;
+    println!("[OpenCode] MiniMax 查询开始 (API Key 已配置)");
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(MINIMAX_TIMEOUT_SECS))
         .build()
@@ -261,7 +264,7 @@ pub async fn opencode_get_minimax(api_key: Option<String>) -> Result<MiniMaxUsag
 
     let resp = client
         .get(MINIMAX_API_URL)
-        .header("Authorization", format!("Bearer {}", get_minimax_api_key(api_key)))
+        .header("Authorization", format!("Bearer {key}"))
         .header("Content-Type", "application/json")
         .send()
         .await

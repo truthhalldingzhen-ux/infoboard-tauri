@@ -1,11 +1,14 @@
 import { useEffect, useState, useCallback } from 'react'
 import { X } from 'lucide-react'
+import { listen } from '@tauri-apps/api/event'
 
 interface ToastData {
   message: string
   color?: string
   bg?: string
   duration?: number
+  /** 后端 toast_show 事件字段 */
+  level?: string
 }
 
 interface ToastItem {
@@ -17,6 +20,21 @@ interface ToastItem {
 
 let toastId = 0
 
+/** 按 level 映射边框色 */
+function colorForLevel(level?: string): string | undefined {
+  switch (level) {
+    case 'success':
+      return '#4ADE80'
+    case 'error':
+      return '#ef4444'
+    case 'warn':
+    case 'warning':
+      return '#f59e0b'
+    default:
+      return undefined
+  }
+}
+
 export default function GlobalToast() {
   const [toasts, setToasts] = useState<ToastItem[]>([])
 
@@ -26,9 +44,11 @@ export default function GlobalToast() {
 
   const addToast = useCallback(
     (data: ToastData) => {
+      if (!data?.message) return
       const id = ++toastId
+      const color = data.color || colorForLevel(data.level)
       setToasts((prev) => {
-        const next = [...prev, { id, message: data.message, color: data.color, bg: data.bg }]
+        const next = [...prev, { id, message: data.message, color, bg: data.bg }]
         return next.length > 3 ? next.slice(-3) : next
       })
       setTimeout(() => removeToast(id), data.duration || 4000)
@@ -36,12 +56,35 @@ export default function GlobalToast() {
     [removeToast]
   )
 
+  // DOM 自定义事件（前端 toastAPI / 插件）
   useEffect(() => {
     const handler = (e: Event) => {
       addToast((e as CustomEvent).detail as ToastData)
     }
     window.addEventListener('toast-show', handler)
     return () => window.removeEventListener('toast-show', handler)
+  }, [addToast])
+
+  // 后端 core/toast emit("toast_show")
+  useEffect(() => {
+    let unlisten: (() => void) | undefined
+    let cancelled = false
+
+    listen<ToastData>('toast_show', (event) => {
+      if (!cancelled) addToast(event.payload)
+    })
+      .then((fn) => {
+        if (cancelled) fn()
+        else unlisten = fn
+      })
+      .catch((err) => {
+        console.warn('[GlobalToast] 监听 toast_show 失败:', err)
+      })
+
+    return () => {
+      cancelled = true
+      unlisten?.()
+    }
   }, [addToast])
 
   if (toasts.length === 0) return null

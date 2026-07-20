@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// 复刻原版 MailConfig 接口
+/// 复刻原版 MailConfig 接口（磁盘/连接用，含密码）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MailConfig {
     pub host: String,
@@ -13,6 +13,33 @@ pub struct MailConfig {
     pub secure: bool,
     pub user: String,
     pub pass: String,
+}
+
+/// 返回给前端的邮箱配置（密码脱敏，不回传明文）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MailConfigPublic {
+    pub host: String,
+    pub port: u16,
+    pub secure: bool,
+    pub user: String,
+    /// 始终为空，避免密码进入前端内存/日志
+    pub pass: String,
+    pub has_pass: bool,
+}
+
+impl MailConfig {
+    /// 脱敏视图：列表展示用
+    pub fn to_public(&self) -> MailConfigPublic {
+        MailConfigPublic {
+            host: self.host.clone(),
+            port: self.port,
+            secure: self.secure,
+            user: self.user.clone(),
+            pass: String::new(),
+            has_pass: !self.pass.is_empty(),
+        }
+    }
 }
 
 /// 复刻原版 MailSummary 接口

@@ -210,6 +210,7 @@ export function DynamicIsland({ manifest, expanded }: PluginComponentProps) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ command }),
+            signal: AbortSignal.timeout(1500),
           })
           return true
         } catch {

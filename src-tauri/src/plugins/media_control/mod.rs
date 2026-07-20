@@ -301,12 +301,12 @@ pub async fn media_get_current_session(
                 data,
                 mime_prefix: mime.clone(),
             });
-            (cache.as_ref().unwrap().data.clone(), cache.as_ref().unwrap().mime_prefix.clone())
+            cache.as_ref().map(|c| (c.data.clone(), c.mime_prefix.clone())).unwrap_or_default()
         }
     } else {
         let (mime, data) = split_thumbnail_data(&thumbnail);
         *cache = Some(ThumbnailCache { title: smtc_title.clone(), data, mime_prefix: mime.clone() });
-        (cache.as_ref().unwrap().data.clone(), cache.as_ref().unwrap().mime_prefix.clone())
+        cache.as_ref().map(|c| (c.data.clone(), c.mime_prefix.clone())).unwrap_or_default()
     };
     let final_thumb = if thumbnail_data.is_empty() { String::new() } else { format!("{thumbnail_mime}{thumbnail_data}") };
 
@@ -379,7 +379,7 @@ fn parse_window_title(window_title: &str) -> Option<(String, String)> {
 
     let parts: Vec<&str> = cleaned.split(&['—', '-'][..]).collect();
     if parts.len() >= 2 {
-        let artist = parts.last().unwrap().trim().to_string();
+        let artist = parts.last().map(|s| s.trim().to_string()).unwrap_or_default();
         let title = parts[..parts.len() - 1].join(" - ").trim().to_string();
         if !title.is_empty() && !artist.is_empty() && artist.len() < 20 {
             return Some((title, artist));

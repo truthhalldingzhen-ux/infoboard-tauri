@@ -1,7 +1,7 @@
 /**
  * 通知 Hook
  *
- * 通过轮询获取邮件列表（每 3 秒）
+ * 通过轮询获取邮件列表（快检 5 秒 / 全量 30 秒）
  * 新邮件到达时自动提取验证码并复制到剪贴板
  *
  * 使用 ref 存储可变状态，避免闭包循环导致 effect 反复重跑
@@ -15,7 +15,7 @@ import * as mailBridge from './mail-bridge'
 /** 全量刷新间隔（毫秒） */
 const FULL_REFRESH_INTERVAL = 30_000
 /** 新邮件快检间隔（毫秒） */
-const NEW_CHECK_INTERVAL = 1_000
+const NEW_CHECK_INTERVAL = 5_000
 
 interface UseNotificationsReturn {
   notifications: NotificationItem[]
@@ -87,7 +87,7 @@ export function useNotifications(): UseNotificationsReturn {
   }, []) // 无依赖：通过 ref 读取最新状态
 
   /**
-   * 快检（每 1 秒）— 主进程已完成检测+拉取+提取+复制，这里只读结果
+   * 快检（每 5 秒）— 检测新邮件 + 验证码提取，结果写回列表
    */
   const doCheckNew = useCallback(async () => {
     if (checkingRef.current || !connectedRef.current) return
@@ -257,7 +257,7 @@ export function useNotifications(): UseNotificationsReturn {
         if (unmounted) return
         setIsLoading(false)
 
-        // 快检：每 1 秒检查
+        // 快检：每 5 秒检查（避免 IMAP 连接风暴）
         newCheckTimer = setInterval(() => {
           doCheckNew()
         }, NEW_CHECK_INTERVAL)
@@ -279,6 +279,9 @@ export function useNotifications(): UseNotificationsReturn {
       unmounted = true
       if (newCheckTimer) clearInterval(newCheckTimer)
       if (fullRefreshTimer) clearInterval(fullRefreshTimer)
+      // 组件卸载时断开 IMAP，避免后台空转连接
+      void mailBridge.disconnectAll()
+      connectedRef.current = false
     }
   }, []) // 空依赖：只运行一次
 

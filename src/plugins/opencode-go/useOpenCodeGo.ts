@@ -12,6 +12,7 @@ import type {
   UseOpenCodeGoResult,
   UsageStats,
   MiniMaxUsage,
+  SessionInfo,
 } from './types'
 import { POLL_INTERVAL } from './config'
 
@@ -112,7 +113,8 @@ export function useOpenCodeGo(): UseOpenCodeGoResult {
       if (abortRef.current || currentRevision !== revisionRef.current) return
 
       const stats: UsageStats | null = usageResult.status === 'fulfilled' ? usageResult.value : null
-      const sessions = sessionsResult.status === 'fulfilled' ? sessionsResult.value : []
+      const sessions: SessionInfo[] =
+        sessionsResult.status === 'fulfilled' ? sessionsResult.value : []
       const minimax = minimaxResult.status === 'fulfilled' ? minimaxResult.value : null
 
       if (!stats) {
@@ -146,8 +148,8 @@ export function useOpenCodeGo(): UseOpenCodeGoResult {
 
       // 过滤 minimax error（不阻塞 opencode 显示）
       let minimaxData: MiniMaxUsage | undefined = undefined
-      if (minimax && 'rollingUsed' in minimax) {
-        minimaxData = minimax as MiniMaxUsage
+      if (minimax && typeof minimax === 'object' && minimax !== null && 'rollingUsed' in minimax) {
+        minimaxData = minimax
       }
 
       const newData: OpenCodeGoData = {

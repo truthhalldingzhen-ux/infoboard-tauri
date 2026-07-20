@@ -1,4 +1,4 @@
-﻿//! OCR 文字识别 — Tauri 后端
+//! OCR 文字识别 — Tauri 后端
 //!
 //! 对齐 Electron ocr.ts：
 //! - 长驻 RapidOCR-json 子进程 + 串行请求队列
@@ -60,7 +60,7 @@ impl OcrEngine {
     }
 
     pub fn is_engine_ready(&self) -> bool {
-        self.state.lock().unwrap().ready
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).ready
     }
 
     fn shutdown_locked(state: &mut EngineState, req_tx: &mut Option<Sender<PendingRequest>>) {
@@ -73,16 +73,16 @@ impl OcrEngine {
     }
 
     pub fn shutdown(&self) {
-        let mut state = self.state.lock().unwrap();
-        let mut req_tx = self.req_tx.lock().unwrap();
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let mut req_tx = self.req_tx.lock().unwrap_or_else(|e| e.into_inner());
         Self::shutdown_locked(&mut state, &mut req_tx);
     }
 
     /// 启动进程与读写线程，并阻塞等待 init completed（有截止时间）
     fn ensure_started(&self) -> Result<(), String> {
         {
-            let state = self.state.lock().unwrap();
-            let has_tx = self.req_tx.lock().unwrap().is_some();
+            let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            let has_tx = self.req_tx.lock().unwrap_or_else(|e| e.into_inner()).is_some();
             if state.process.is_some() && state.ready && has_tx {
                 return Ok(());
             }
@@ -179,17 +179,17 @@ impl OcrEngine {
             .map_err(|e| format!("启动 OCR 写线程失败: {}", e))?;
 
         {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             state.process = Some(child);
             state.ready = false;
         }
-        *self.req_tx.lock().unwrap() = Some(req_tx);
+        *self.req_tx.lock().unwrap_or_else(|e| e.into_inner()) = Some(req_tx);
 
         // 等 init（轮询 ready，不阻塞在 read_line）
         let deadline = Instant::now() + INIT_TIMEOUT;
         while Instant::now() < deadline {
             {
-                let st = self.state.lock().unwrap();
+                let st = self.state.lock().unwrap_or_else(|e| e.into_inner());
                 if st.ready {
                     return Ok(());
                 }
@@ -210,7 +210,7 @@ impl OcrEngine {
         let req_tx = self
             .req_tx
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .clone()
             .ok_or_else(|| "OCR 请求通道未就绪".to_string())?;
 

@@ -7,13 +7,23 @@
 
 import { invoke } from '@tauri-apps/api/core'
 
-/** 邮箱账户配置 */
+/** 邮箱账户配置（写入/连接时使用，含密码） */
 export interface MailConfig {
   host: string
   port: number
   secure: boolean
   user: string
   pass: string
+}
+
+/** 列表展示用配置（后端脱敏：pass 为空） */
+export interface MailConfigPublic {
+  host: string
+  port: number
+  secure: boolean
+  user: string
+  pass: string
+  hasPass: boolean
 }
 
 /** 邮件摘要 */
@@ -41,9 +51,9 @@ export interface CheckNewResult {
 /**
  * 获取所有邮箱配置
  */
-export async function getConfig(): Promise<MailConfig[]> {
+export async function getConfig(): Promise<MailConfigPublic[]> {
   try {
-    return await invoke<MailConfig[]>('mail_get_config')
+    return await invoke<MailConfigPublic[]>('mail_get_config')
   } catch (err) {
     console.error('[mail] getConfig 失败:', err)
     return []

@@ -22,6 +22,7 @@ export interface OcrResult {
 /** OCR 引擎状态 */
 export interface OcrEngineStatus {
   ready: boolean
+  engine_ready: boolean
   engine_path: string
 }
 
@@ -60,6 +61,6 @@ export async function engineStatus(): Promise<OcrEngineStatus> {
     return await invoke<OcrEngineStatus>('ocr_engine_status')
   } catch (err) {
     console.error('[OCR] engineStatus 失败:', err)
-    return { ready: false, engine_path: '' }
+    return { ready: false, engine_ready: false, engine_path: '' }
   }
 }

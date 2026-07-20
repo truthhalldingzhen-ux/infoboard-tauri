@@ -70,13 +70,26 @@ impl MailManager {
         fs::write(&self.config_path, json).map_err(|e| format!("写入失败: {}", e))
     }
 
-    pub fn get_config(&self) -> Vec<MailConfig> { self.read_config() }
-    pub fn set_config(&self, accounts: Vec<MailConfig>) -> Result<(), String> { self.write_config(&accounts) }
+    /// 前端可读配置（密码已脱敏）
+    pub fn get_config_public(&self) -> Vec<MailConfigPublic> {
+        self.read_config().iter().map(MailConfig::to_public).collect()
+    }
+    pub fn set_config(&self, accounts: Vec<MailConfig>) -> Result<(), String> {
+        self.write_config(&accounts)
+    }
     pub fn add_account(&self, config: MailConfig) -> Result<(), String> {
-        let mut a = self.read_config(); a.retain(|x| x.user != config.user); a.push(config); self.write_config(&a)
+        if config.user.is_empty() || config.pass.is_empty() {
+            return Err("邮箱地址和密码不能为空".into());
+        }
+        let mut a = self.read_config();
+        a.retain(|x| x.user != config.user);
+        a.push(config);
+        self.write_config(&a)
     }
     pub fn remove_account(&self, user: &str) -> Result<(), String> {
-        let mut a = self.read_config(); a.retain(|x| x.user != user); self.write_config(&a)
+        let mut a = self.read_config();
+        a.retain(|x| x.user != user);
+        self.write_config(&a)
     }
 
     // ─── IMAP 连接（同步）───
@@ -99,7 +112,7 @@ impl MailManager {
 
     /// 复刻原版 connectAll: 逐个连接、status 获取 uidNext、收集错误
     pub fn connect_from_configs(&self, configs: &[MailConfig]) -> ConnectResult {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         if inner.connecting {
             return ConnectResult { success: false, errors: vec!["正在连接中".into()] };
         }
@@ -133,7 +146,7 @@ impl MailManager {
     }
 
     pub fn disconnect_all(&self) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.connecting = false;
         for (_, state) in inner.accounts.drain() {
             if let Some(mut s) = state.session { let _ = s.logout(); }
@@ -146,7 +159,7 @@ impl MailManager {
     pub fn fetch_recent(&self, count: u32) -> Vec<MailSummary> {
         // 一次性取出所有账户信息，释放锁后执行 I/O
         let configs: Vec<MailConfig> = {
-            let inner = self.inner.lock().unwrap();
+            let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
             inner.accounts.values().filter(|s| s.connected).map(|s| s.config.clone()).collect()
         };
         let mut all = Vec::new();
@@ -203,7 +216,7 @@ impl MailManager {
 
     pub fn check_new(&self) -> CheckNewResult {
         let configs: Vec<MailConfig> = {
-            let mut inner = self.inner.lock().unwrap();
+            let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
             if inner.checking_new { return CheckNewResult { new_mails: vec![], code: None }; }
             inner.checking_new = true;
             inner.accounts.values().filter(|s| s.connected).map(|s| s.config.clone()).collect()
@@ -228,7 +241,7 @@ impl MailManager {
         }
 
         {
-            let mut inner = self.inner.lock().unwrap();
+            let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
             inner.checking_new = false;
         }
         merged
@@ -302,7 +315,7 @@ impl MailManager {
 
     pub fn fetch_content(&self, uid: u32, account: &str) -> Option<String> {
         let config = {
-            let inner = self.inner.lock().unwrap();
+            let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
             inner.accounts.get(account)?.config.clone()
         };
         let mut session = Self::connect_one(&config).ok()?;
@@ -318,7 +331,7 @@ impl MailManager {
 
     pub fn mark_read(&self, uids: Vec<u32>, account: &str) -> bool {
         let config = {
-            let inner = self.inner.lock().unwrap();
+            let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
             match inner.accounts.get(account) { Some(s) => s.config.clone(), None => return false }
         };
         let mut session = match Self::connect_one(&config) { Ok(s) => s, Err(_) => return false };
@@ -330,7 +343,7 @@ impl MailManager {
     }
 
     pub fn connection_info(&self) -> Value {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let accs: Vec<_> = inner.accounts.iter().map(|(u, s)| serde_json::json!({ "user": u, "connected": s.connected })).collect();
         serde_json::json!({ "connected_count": accs.iter().filter(|a| a["connected"].as_bool() == Some(true)).count(), "accounts": accs })
     }
@@ -605,26 +618,62 @@ fn extract_code(text: &str) -> Option<String> {
 /// .replace(/\n{3,}/g, '\n\n')
 /// .trim()
 fn parse_email_body(raw: &str) -> String {
-    let br = Regex::new(r"(?i)<br\s*/?>").unwrap();
-    let block = Regex::new(r"(?i)</p>|</div>").unwrap();
-    let tag = Regex::new(r"<[^>]+>").unwrap();
-    let newlines = Regex::new(r"\n{3,}").unwrap();
+    // 固定正则，编译失败才 panic（模式字面量，启动期可接受）
+    static RE_BR: std::sync::LazyLock<Regex> =
+        std::sync::LazyLock::new(|| Regex::new(r"(?i)<br\s*/?>").expect("mail RE_BR"));
+    static RE_BLOCK: std::sync::LazyLock<Regex> =
+        std::sync::LazyLock::new(|| Regex::new(r"(?i)</p>|</div>").expect("mail RE_BLOCK"));
+    static RE_TAG: std::sync::LazyLock<Regex> =
+        std::sync::LazyLock::new(|| Regex::new(r"<[^>]+>").expect("mail RE_TAG"));
+    static RE_NL: std::sync::LazyLock<Regex> =
+        std::sync::LazyLock::new(|| Regex::new(r"\n{3,}").expect("mail RE_NL"));
 
-    let s = br.replace_all(raw, "\n");
-    let s = block.replace_all(&s, "\n");
-    let s = tag.replace_all(&s, "");
-    let s = s.replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">");
-    let s = newlines.replace_all(&s, "\n\n");
+    let s = RE_BR.replace_all(raw, "\n");
+    let s = RE_BLOCK.replace_all(&s, "\n");
+    let s = RE_TAG.replace_all(&s, "");
+    let s = s
+        .replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">");
+    let s = RE_NL.replace_all(&s, "\n\n");
     s.trim().to_string()
 }
 
 // ─── Tauri Commands ───
 // 所有命令通过 spawn_blocking 执行，锁定 mutex 后委托给 MailManagerInner
 
-#[tauri::command] pub async fn mail_get_config(state: tauri::State<'_, MailManager>) -> Result<Vec<MailConfig>, String> { Ok(state.get_config()) }
-#[tauri::command] pub async fn mail_set_config(state: tauri::State<'_, MailManager>, accounts: Vec<MailConfig>) -> Result<(), String> { state.set_config(accounts) }
-#[tauri::command] pub async fn mail_add_account(state: tauri::State<'_, MailManager>, config: MailConfig) -> Result<(), String> { state.add_account(config) }
-#[tauri::command] pub async fn mail_remove_account(state: tauri::State<'_, MailManager>, user: String) -> Result<(), String> { state.remove_account(&user) }
+/// 返回脱敏配置（pass 为空，hasPass 表示是否已保存密码）
+#[tauri::command]
+pub async fn mail_get_config(
+    state: tauri::State<'_, MailManager>,
+) -> Result<Vec<MailConfigPublic>, String> {
+    Ok(state.get_config_public())
+}
+
+#[tauri::command]
+pub async fn mail_set_config(
+    state: tauri::State<'_, MailManager>,
+    accounts: Vec<MailConfig>,
+) -> Result<(), String> {
+    state.set_config(accounts)
+}
+
+#[tauri::command]
+pub async fn mail_add_account(
+    state: tauri::State<'_, MailManager>,
+    config: MailConfig,
+) -> Result<(), String> {
+    state.add_account(config)
+}
+
+#[tauri::command]
+pub async fn mail_remove_account(
+    state: tauri::State<'_, MailManager>,
+    user: String,
+) -> Result<(), String> {
+    state.remove_account(&user)
+}
 
 #[tauri::command]
 pub async fn mail_connect_saved(state: tauri::State<'_, MailManager>) -> Result<Value, String> {
@@ -632,7 +681,7 @@ pub async fn mail_connect_saved(state: tauri::State<'_, MailManager>) -> Result<
     if configs.is_empty() { return Ok(serde_json::json!({"success":false,"errors":["未配置邮箱"]})); }
     let inner = state.inner.clone();
     let result = tokio::task::spawn_blocking(move || {
-        let mut g = inner.lock().unwrap();
+        let mut g = inner.lock().unwrap_or_else(|e| e.into_inner());
         g.connect_from_configs(&configs)
     }).await.map_err(|e| format!("连接失败: {}", e))?;
     Ok(serde_json::json!({"success": result.success, "errors": result.errors }))
@@ -643,7 +692,7 @@ pub async fn mail_fetch_recent(state: tauri::State<'_, MailManager>, count: Opti
     let inner = state.inner.clone();
     let c = count.unwrap_or(FETCH_RECENT_COUNT);
     tokio::task::spawn_blocking(move || {
-        let g = inner.lock().unwrap();
+        let g = inner.lock().unwrap_or_else(|e| e.into_inner());
         g.fetch_recent(c)
     }).await.map_err(|e| format!("拉取失败: {}", e))
 }
@@ -652,7 +701,7 @@ pub async fn mail_fetch_recent(state: tauri::State<'_, MailManager>, count: Opti
 pub async fn mail_check_new(state: tauri::State<'_, MailManager>) -> Result<Value, String> {
     let inner = state.inner.clone();
     let result = tokio::task::spawn_blocking(move || {
-        let mut g = inner.lock().unwrap();
+        let mut g = inner.lock().unwrap_or_else(|e| e.into_inner());
         g.check_new()
     }).await.map_err(|e| format!("检测失败: {}", e))?;
     Ok(serde_json::json!({"newMails": result.new_mails, "code": result.code}))
@@ -662,7 +711,7 @@ pub async fn mail_check_new(state: tauri::State<'_, MailManager>) -> Result<Valu
 pub async fn mail_fetch_content(state: tauri::State<'_, MailManager>, uid: u32, account: String) -> Result<Option<String>, String> {
     let inner = state.inner.clone();
     tokio::task::spawn_blocking(move || {
-        let g = inner.lock().unwrap();
+        let g = inner.lock().unwrap_or_else(|e| e.into_inner());
         g.fetch_content(uid, &account)
     }).await.map_err(|e| format!("正文失败: {}", e))
 }
@@ -671,7 +720,7 @@ pub async fn mail_fetch_content(state: tauri::State<'_, MailManager>, uid: u32, 
 pub async fn mail_mark_read(state: tauri::State<'_, MailManager>, uids: Vec<u32>, account: String) -> Result<bool, String> {
     let inner = state.inner.clone();
     tokio::task::spawn_blocking(move || {
-        let g = inner.lock().unwrap();
+        let g = inner.lock().unwrap_or_else(|e| e.into_inner());
         g.mark_read(uids, &account)
     }).await.map_err(|e| format!("标记失败: {}", e))
 }
@@ -679,14 +728,14 @@ pub async fn mail_mark_read(state: tauri::State<'_, MailManager>, uids: Vec<u32>
 #[tauri::command]
 pub async fn mail_disconnect_all(state: tauri::State<'_, MailManager>) -> Result<(), String> {
     let inner = state.inner.clone();
-    tokio::task::spawn_blocking(move || { inner.lock().unwrap().disconnect_all(); Ok::<(), String>(()) })
+    tokio::task::spawn_blocking(move || { inner.lock().unwrap_or_else(|e| e.into_inner()).disconnect_all(); Ok::<(), String>(()) })
         .await.map_err(|e| format!("断开失败: {}", e))?
 }
 
 #[tauri::command]
 pub async fn mail_connection_info(state: tauri::State<'_, MailManager>) -> Result<Value, String> {
     let inner = state.inner.clone();
-    tokio::task::spawn_blocking(move || { let g = inner.lock().unwrap(); g.connection_info() })
+    tokio::task::spawn_blocking(move || { let g = inner.lock().unwrap_or_else(|e| e.into_inner()); g.connection_info() })
         .await.map_err(|e| format!("状态失败: {}", e))
 }
 

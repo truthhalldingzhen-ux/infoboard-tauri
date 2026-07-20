@@ -1,4 +1,4 @@
-﻿//! 截图模块 — Tauri 后端
+//! 截图模块 — Tauri 后端
 //!
 //! 对齐 QQ 体验的修复版：
 //! 1. xcap 原生截图（优先主显示器）
@@ -12,6 +12,12 @@ use tauri::webview::WebviewWindowBuilder;
 use tauri::{AppHandle, Emitter, Listener, Manager, WebviewUrl};
 
 static CAPTURED: Mutex<Option<String>> = Mutex::new(None);
+
+/// 安全获取 CAPTURED 锁；poison 时恢复内部值
+fn captured_lock() -> std::sync::MutexGuard<'static, Option<String>> {
+    CAPTURED.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 const OVERLAY_LABEL: &str = "screenshot-overlay";
 
 /// 兼容旧调用：空实现
@@ -61,7 +67,7 @@ pub async fn screenshot_start(app: AppHandle) -> Result<(), String> {
     let data_url = tokio::task::spawn_blocking(capture_screen_native)
         .await
         .map_err(|e| format!("截图任务失败: {}", e))??;
-    *CAPTURED.lock().unwrap() = Some(data_url.clone());
+    *captured_lock() = Some(data_url.clone());
 
     // 2) 关掉旧覆盖窗
     if let Some(old) = app.get_webview_window(OVERLAY_LABEL) {
@@ -123,7 +129,7 @@ pub async fn screenshot_start(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub fn screenshot_get_image() -> Result<Option<String>, String> {
-    Ok(CAPTURED.lock().unwrap().clone())
+    Ok(captured_lock().clone())
 }
 
 /// 确认：写剪贴板 + 关闭覆盖窗
@@ -166,7 +172,7 @@ pub async fn screenshot_close_overlay(app: AppHandle) -> Result<(), String> {
 }
 
 fn close_overlay_inner(app: &AppHandle) {
-    *CAPTURED.lock().unwrap() = None;
+    *captured_lock() = None;
     if let Some(overlay) = app.get_webview_window(OVERLAY_LABEL) {
         let _ = overlay.close();
     }

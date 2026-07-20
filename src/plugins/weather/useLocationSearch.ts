@@ -132,9 +132,21 @@ export function useLocationSearch(): UseLocationSearchReturn & {
         // GPS 失败，回退到 IP 定位
         const ipData = await window.electronAPI.geolocate()
         console.log('[天气插件] IP 定位结果:', JSON.stringify(ipData))
-        if (ipData.error) throw new Error(`IP 定位失败: ${ipData.reason || 'unknown'}`)
-        lat = ipData.latitude
-        lon = ipData.longitude
+        if (!ipData) throw new Error('IP 定位失败: 无结果')
+        if ('error' in ipData && ipData.error) {
+          throw new Error(
+            `IP 定位失败: ${'reason' in ipData ? ipData.reason || 'unknown' : 'unknown'}`
+          )
+        }
+        if ('lat' in ipData && typeof ipData.lat === 'number') {
+          lat = ipData.lat
+          lon = ipData.lon
+        } else if ('latitude' in ipData && typeof ipData.latitude === 'number') {
+          lat = ipData.latitude
+          lon = ipData.longitude
+        } else {
+          throw new Error('IP 定位失败: 坐标格式无效')
+        }
         console.log('[天气插件] 使用 IP 坐标:', lat, lon)
       }
 
@@ -202,14 +214,24 @@ export function useLocationSearch(): UseLocationSearchReturn & {
           return
         }
 
-        const cities: CityInfo[] = (data.location || []).map((loc: any) => ({
-          locationId: loc.id,
-          name: loc.name,
-          adm2: loc.adm2,
-          adm1: loc.adm1,
-          country: loc.country,
-          lon: loc.lon,
-          lat: loc.lat,
+        type GeoLoc = {
+          id?: string
+          name?: string
+          adm2?: string
+          adm1?: string
+          country?: string
+          lon?: string
+          lat?: string
+        }
+        const locations = (data.location || []) as GeoLoc[]
+        const cities: CityInfo[] = locations.map((loc) => ({
+          locationId: loc.id ?? '',
+          name: loc.name ?? '',
+          adm2: loc.adm2 ?? '',
+          adm1: loc.adm1 ?? '',
+          country: loc.country ?? '',
+          lon: loc.lon ?? '',
+          lat: loc.lat ?? '',
         }))
 
         setResults(cities)

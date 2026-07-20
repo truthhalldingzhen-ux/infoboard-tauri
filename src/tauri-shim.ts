@@ -4,13 +4,13 @@ import * as autostart from './core/autostart-bridge'
 /** 将旧版 Electron IPC 映射到 Tauri invoke */
 export function initTauriShim() {
   window.electronAPI = {
-    minimize: () => invoke('window_minimize'),
-    maximize: () => invoke('window_maximize'),
-    close: () => invoke('window_close'),
-    isMaximized: () => invoke('window_is_maximized'),
-    isVisible: () => invoke('window_is_visible'),
+    minimize: () => invoke<void>('window_minimize'),
+    maximize: () => invoke<void>('window_maximize'),
+    close: () => invoke<void>('window_close'),
+    isMaximized: () => invoke<boolean>('window_is_maximized'),
+    isVisible: () => invoke<boolean>('window_is_visible'),
     platform: 'win32',
-    geolocate: () => invoke('geolocate_ip'),
+    geolocate: () => invoke<GeolocateResult>('geolocate_ip'),
     toggleTitleBar: async () => {
       window.dispatchEvent(new CustomEvent('toggle-titlebar'))
       return true
@@ -26,13 +26,14 @@ export function initTauriShim() {
         if (typeof v === 'string') cb(v)
       })
     },
-    ocrRecognize: async (imageBase64: string) => invoke('ocr_recognize', { imageBase64 }),
+    ocrRecognize: async (imageBase64: string) =>
+      invoke<OcrResponse>('ocr_recognize', { imageBase64 }),
   }
 
   window.opencodeDB = {
     getUsage: () => {
       console.log('[opencode] 调用 getUsage')
-      return invoke('opencode_get_usage')
+      return invoke<OpenCodeUsageStats>('opencode_get_usage')
         .then((r) => {
           console.log('[opencode] getUsage 结果:', r)
           return r
@@ -42,18 +43,21 @@ export function initTauriShim() {
           throw e
         })
     },
-    getSessions: () => invoke('opencode_get_sessions'),
+    getSessions: (limit?: number) =>
+      invoke<OpenCodeSessionInfo[]>('opencode_get_sessions', { limit }),
     getMiniMax: () => {
       console.log('[opencode] 调用 getMiniMax')
       // 从设置中读取 MiniMax API Key
       let apiKey: string | undefined
       try {
         const s = localStorage.getItem('infoboard-settings')
-        if (s) apiKey = JSON.parse(s).minimaxApiKey
+        if (s) apiKey = (JSON.parse(s) as { minimaxApiKey?: string }).minimaxApiKey
       } catch {
         /* */
       }
-      return invoke('opencode_get_minimax', { apiKey: apiKey || '' })
+      return invoke<OpenCodeMiniMaxUsage>('opencode_get_minimax', {
+        apiKey: apiKey || null,
+      })
         .then((r) => {
           console.log('[opencode] getMiniMax 结果:', r)
           return r
@@ -63,8 +67,8 @@ export function initTauriShim() {
           throw e
         })
     },
-    refreshCookie: () => invoke('opencode_refresh_cookie'),
-    getCookieMtime: () => invoke('opencode_get_cookie_mtime'),
+    refreshCookie: () => invoke<OpenCodeRefreshResult>('opencode_refresh_cookie'),
+    getCookieMtime: () => invoke<number>('opencode_get_cookie_mtime'),
   }
 
   window.toastAPI = {

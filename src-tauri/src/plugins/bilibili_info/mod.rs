@@ -79,20 +79,27 @@ struct ViewStat {
 // ─── 标题清洗 ───
 
 /// 清洗标题（复刻 Electron cleanTitle）—— 保留空格，供搜索用
-fn clean_title(raw: &str) -> String {
-    let re_prefix = regex::Regex::new(r"(?i)^\d+[\s\-_.]*[歌曲音乐]*[\s\-_.]*").unwrap();
-    let re_suffix = regex::Regex::new(r"(?i)\s*[-—]\s*(哔哩哔哩|bilibili)$").unwrap();
+// 预编译正则，避免热路径每次 Regex::new
+static RE_TITLE_PREFIX: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(r"(?i)^\d+[\s\-_.]*[歌曲音乐]*[\s\-_.]*").expect("RE_TITLE_PREFIX")
+});
+static RE_TITLE_SUFFIX: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(r"(?i)\s*[-—]\s*(哔哩哔哩|bilibili)$").expect("RE_TITLE_SUFFIX")
+});
+static RE_HTML_TAG: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(r"<[^>]+>").expect("RE_HTML_TAG")
+});
 
+fn clean_title(raw: &str) -> String {
     let mut t = raw.to_string();
-    t = re_prefix.replace(&t, "").to_string();
-    t = re_suffix.replace(&t, "").to_string();
+    t = RE_TITLE_PREFIX.replace(&t, "").to_string();
+    t = RE_TITLE_SUFFIX.replace(&t, "").to_string();
     t.trim().to_string()
 }
 
 /// 归一化用于比较（去 HTML、去空白、小写）—— 复刻 Electron normalized()
 fn normalize_for_match(s: &str) -> String {
-    let re_html = regex::Regex::new(r"<[^>]+>").unwrap();
-    let t = re_html.replace_all(s, "");
+    let t = RE_HTML_TAG.replace_all(s, "");
     t.chars()
         .filter(|c| !c.is_whitespace())
         .collect::<String>()
