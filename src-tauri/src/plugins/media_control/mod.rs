@@ -241,7 +241,7 @@ pub async fn media_get_current_session(
     app: AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<Option<MediaSession>, String> {
-    crate::core::app_log::emit(&app, "debug", "[SMTC] 获取当前媒体会话开始");
+    // 高频轮询，不写日志台以免刷屏
     // 拼接 helper + 查询脚本
     let script = format!("{PS_AWAIT_HELPER}\n{PS_QUERY_COMBINED}");
 
