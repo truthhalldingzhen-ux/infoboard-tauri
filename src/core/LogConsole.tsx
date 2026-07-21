@@ -12,6 +12,7 @@ import {
   exportLogsText,
   formatLogLine,
   getLogEntries,
+  getLogFilePath,
   subscribeLogs,
   type LogEntry,
   type LogLevel,
@@ -225,10 +226,15 @@ export default function LogConsole({ open, onClose }: LogConsoleProps) {
       </div>
 
       <div
-        className="px-3 py-1 text-[10px] border-t shrink-0"
+        className="px-3 py-1 text-[10px] border-t shrink-0 flex flex-col gap-0.5"
         style={{ color: 'var(--text-muted)', borderColor: 'var(--border-subtle)' }}
       >
-        F12 开关 · 打包后也可用 · 最多保留 500 条
+        <span>F12 开关 · 打包后也可用 · 最多保留 800 条 · WEB/RUST 双通道</span>
+        {getLogFilePath() ? (
+          <span className="truncate" title={getLogFilePath() || ''}>
+            文件: {getLogFilePath()}
+          </span>
+        ) : null}
       </div>
     </div>
   )

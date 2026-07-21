@@ -1,9 +1,12 @@
 /**
- * 应用内日志控制台 — 拦截 console 输出供打包后调试
+ * 应用内日志控制台 — 拦截 console + 接收后端 app_log 事件
  *
- * 在入口最早调用 installLogConsole()，之后 console.log/warn/error 等会同步写入环形缓冲，
- * 面板通过订阅刷新 UI。
+ * 打包后无 DevTools 时，用 F12 / 右键菜单打开日志台排查问题。
+ * 后端日志同时写入 %APPDATA%/infoboard-tauri/app.log。
  */
+
+import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 
 export type LogLevel = 'log' | 'info' | 'warn' | 'error' | 'debug'
 
@@ -12,19 +15,20 @@ export interface LogEntry {
   level: LogLevel
   message: string
   timestamp: number
-  /** 序列化后的参数（便于复制） */
   args: string[]
+  source?: 'web' | 'rust'
 }
 
 type Listener = () => void
 
-const MAX_ENTRIES = 500
+const MAX_ENTRIES = 800
 let seq = 0
 const entries: LogEntry[] = []
 const listeners = new Set<Listener>()
 let installed = false
+let backendListening = false
+let logFilePath: string | null = null
 
-/** 原始 console 方法（安装后仍可调用） */
 const original = {
   log: console.log.bind(console),
   info: console.info.bind(console),
@@ -54,7 +58,7 @@ function stringifyArg(arg: unknown): string {
     return `${arg.name}: ${arg.message}${arg.stack ? `\n${arg.stack}` : ''}`
   }
   try {
-    return JSON.stringify(arg, null, 0)
+    return JSON.stringify(arg)
   } catch {
     try {
       return String(arg)
@@ -64,7 +68,16 @@ function stringifyArg(arg: unknown): string {
   }
 }
 
-function push(level: LogLevel, args: unknown[]) {
+function normalizeLevel(level: string): LogLevel {
+  const l = level.toLowerCase()
+  if (l === 'error' || l === 'warn' || l === 'info' || l === 'debug' || l === 'log') {
+    return l
+  }
+  if (l === 'warning') return 'warn'
+  return 'info'
+}
+
+function push(level: LogLevel, args: unknown[], source: 'web' | 'rust' = 'web') {
   const message = args.map(stringifyArg).join(' ')
   const entry: LogEntry = {
     id: ++seq,
@@ -72,17 +85,19 @@ function push(level: LogLevel, args: unknown[]) {
     message,
     timestamp: Date.now(),
     args: args.map(stringifyArg),
+    source,
   }
   entries.push(entry)
   if (entries.length > MAX_ENTRIES) {
     entries.splice(0, entries.length - MAX_ENTRIES)
   }
+  // 重要级别同步落盘（后端文件）
+  if (level === 'error' || level === 'warn' || source === 'rust') {
+    void invoke('log_append_file', { level, message: `[${source}] ${message}` }).catch(() => {})
+  }
   notify()
 }
 
-/**
- * 安装 console 拦截（幂等，入口只调一次）
- */
 export function installLogConsole(): void {
   if (installed) return
   installed = true
@@ -90,7 +105,7 @@ export function installLogConsole(): void {
   const wrap =
     (level: LogLevel) =>
     (...args: unknown[]) => {
-      push(level, args)
+      push(level, args, 'web')
       original[level](...args)
     }
 
@@ -100,7 +115,6 @@ export function installLogConsole(): void {
   console.error = wrap('error')
   console.debug = wrap('debug')
 
-  // 未捕获错误
   window.addEventListener('error', (e) => {
     push('error', [
       e.message || 'Uncaught Error',
@@ -112,11 +126,35 @@ export function installLogConsole(): void {
     push('error', ['Unhandled Promise Rejection', e.reason])
   })
 
-  original.info('[LogConsole] 应用内日志台已安装（F12 开关）')
+  // 接收 Rust 后端 app_log
+  if (!backendListening) {
+    backendListening = true
+    listen<{ level: string; message: string; source?: string }>('app_log', (event) => {
+      const p = event.payload
+      push(normalizeLevel(p.level || 'info'), [p.message], 'rust')
+    }).catch((err) => {
+      original.warn('[LogConsole] 监听 app_log 失败', err)
+    })
+
+    invoke<string>('log_get_path')
+      .then((p) => {
+        logFilePath = p
+        push('info', [`[LogConsole] 日志文件: ${p}`], 'web')
+      })
+      .catch(() => {
+        /* 非 Tauri 环境忽略 */
+      })
+  }
+
+  push('info', ['[LogConsole] 应用内日志台已就绪 — 按 F12 打开（打包后同样可用）'], 'web')
 }
 
 export function getLogEntries(): readonly LogEntry[] {
   return entries
+}
+
+export function getLogFilePath(): string | null {
+  return logFilePath
 }
 
 export function clearLogEntries(): void {
@@ -139,14 +177,14 @@ export function formatLogLine(e: LogEntry): string {
     String(t.getSeconds()).padStart(2, '0'),
     String(t.getMilliseconds()).padStart(3, '0'),
   ].join(':')
-  return `[${time}] [${e.level.toUpperCase()}] ${e.message}`
+  const src = e.source === 'rust' ? 'RUST' : 'WEB'
+  return `[${time}] [${e.level.toUpperCase()}] [${src}] ${e.message}`
 }
 
 export function exportLogsText(): string {
   return entries.map(formatLogLine).join('\n')
 }
 
-/** 手动追加一条（后端事件等） */
 export function appendLog(level: LogLevel, ...args: unknown[]): void {
-  push(level, args)
+  push(level, args, 'web')
 }

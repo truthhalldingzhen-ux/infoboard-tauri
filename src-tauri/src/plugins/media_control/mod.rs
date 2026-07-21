@@ -11,7 +11,7 @@ pub mod types;
 use std::process::Command;
 use std::sync::Mutex;
 use std::time::Duration;
-use tauri::State;
+use tauri::{AppHandle, State};
 use types::{MediaSession, ThumbnailCache};
 
 // ─── 常量 ───
@@ -238,9 +238,10 @@ fn run_powershell(script: &str, timeout_secs: u64) -> Result<String, String> {
 
 #[tauri::command]
 pub async fn media_get_current_session(
+    app: AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<Option<MediaSession>, String> {
-    println!("[SMTC] 获取当前媒体会话开始");
+    crate::core::app_log::emit(&app, "debug", "[SMTC] 获取当前媒体会话开始");
     // 拼接 helper + 查询脚本
     let script = format!("{PS_AWAIT_HELPER}\n{PS_QUERY_COMBINED}");
 

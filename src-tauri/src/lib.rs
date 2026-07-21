@@ -2,6 +2,7 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_window_state::{WindowExt, StateFlags};
 
 mod core {
+    pub mod app_log;
     pub mod autostart;
     pub mod geolocate;
     pub mod toast;
@@ -59,6 +60,7 @@ pub fn run() {
         .manage(plugins::media_control::AppState::new())
         .setup(|app| {
             println!("[系统] InfoBoard 启动");
+            core::app_log::emit(app.handle(), "info", "[系统] InfoBoard 启动 · 后端日志已接入日志台");
             core::tray::setup_tray(app.handle())?;
             // 恢复上次关闭时的窗口大小和位置
             if let Some(window) = app.get_webview_window("main") {
@@ -76,6 +78,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             greet,
+            core::app_log::log_get_path,
+            core::app_log::log_append_file,
             core::autostart::autostart_is_enabled,
             core::autostart::autostart_set_enabled,
             core::window::window_minimize,

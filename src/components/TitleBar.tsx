@@ -64,7 +64,28 @@ export function TitleBar() {
 
       {/* 右侧：控制按钮（Pencil 风格 Lucide 图标） */}
       <div className="flex items-center gap-1 no-drag-region">
+        {/* 日志台 */}
+        <button
+          className="w-6 h-6 flex items-center justify-center rounded hover:bg-bg-surface-hover transition-colors"
+          onClick={() => window.dispatchEvent(new CustomEvent('log-console-toggle'))}
+          title="日志台 (F12)"
+        >
+          <svg
+            className="w-3.5 h-3.5 text-text-muted"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="2"
+          >
+            <path d="M4 17l6-6-6-6" />
+            <path d="M12 19h8" />
+          </svg>
+        </button>
+
         {/* 最小化 */}
+
         <button
           className="w-6 h-6 flex items-center justify-center rounded hover:bg-bg-surface-hover transition-colors"
           onClick={handleMinimize}

@@ -9,6 +9,7 @@
 //   4. 用 BV 号调 view API 取封面/UP主
 
 use std::time::Duration;
+use tauri::AppHandle;
 use serde::{Deserialize, Serialize};
 
 // ─── 常量 ───
@@ -245,18 +246,18 @@ async fn get_view(client: &reqwest::Client, bvid: &str) -> Result<BilibiliVideoI
 
 /// 通过 B站 API 补充视频信息（封面 + UP主）
 #[tauri::command]
-pub async fn bilibili_enrich_media(title: String) -> Option<BilibiliVideoInfo> {
+pub async fn bilibili_enrich_media(app: AppHandle, title: String) -> Option<BilibiliVideoInfo> {
     let clean = clean_title(&title);
     if clean.is_empty() {
         return None;
     }
 
-    println!("[bilibili_enrich_media] 搜索: {clean}");
+    crate::core::app_log::emit(&app, "info", &format!("[bilibili] 搜索: {clean}"));
 
     let client = match build_client() {
         Ok(c) => c,
         Err(e) => {
-            println!("[bilibili_enrich_media] 客户端失败: {e}");
+            crate::core::app_log::emit(&app, "error", &format!("[bilibili] 客户端失败: {e}"));
             return None;
         }
     };
@@ -264,34 +265,39 @@ pub async fn bilibili_enrich_media(title: String) -> Option<BilibiliVideoInfo> {
     let results = match search_video(&client, &clean).await {
         Ok(r) => r,
         Err(e) => {
-            println!("[bilibili_enrich_media] 搜索失败: {e}");
+            crate::core::app_log::emit(&app, "error", &format!("[bilibili] 搜索失败: {e}"));
             return None;
         }
     };
 
     if results.is_empty() {
-        println!("[bilibili_enrich_media] 无搜索结果");
+        crate::core::app_log::emit(&app, "warn", &format!("[bilibili] 无搜索结果: {clean}"));
         return None;
     }
 
     let best = find_best_match(&results, &clean)?;
     let bvid = best.bvid.as_deref().filter(|s| !s.is_empty())?;
 
-    eprintln!(
-        "[bilibili_enrich_media] 匹配: bvid={bvid} title={:?}",
-        best.title
+    crate::core::app_log::emit(
+        &app,
+        "info",
+        &format!("[bilibili] 匹配: bvid={bvid} title={:?}", best.title),
     );
 
     match get_view(&client, bvid).await {
         Ok(info) => {
-            eprintln!(
-                "[bilibili_enrich_media] 详情: owner={} cover={}",
-                info.owner_name, info.cover
+            crate::core::app_log::emit(
+                &app,
+                "info",
+                &format!(
+                    "[bilibili] 详情: owner={} cover={}",
+                    info.owner_name, info.cover
+                ),
             );
             Some(info)
         }
         Err(e) => {
-            println!("[bilibili_enrich_media] 详情失败: {e}");
+            crate::core::app_log::emit(&app, "error", &format!("[bilibili] 详情失败: {e}"));
             None
         }
     }
