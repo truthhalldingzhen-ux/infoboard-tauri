@@ -3,10 +3,24 @@ pub mod types;
 
 use std::fs;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use regex::Regex;
+
+
+#[cfg(windows)]
+fn nowin_cmd(program: &str) -> std::process::Command {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    let mut c = std::process::Command::new(program);
+    unsafe { c.creation_flags(CREATE_NO_WINDOW); }
+    c
+}
+#[cfg(not(windows))]
+fn nowin_cmd(program: &str) -> std::process::Command {
+    std::process::Command::new(program)
+}
 
 
 use types::*;
@@ -105,7 +119,7 @@ fn fmt_ms(ms: i64) -> String {
 // ─── Chrome 进程检测 ───
 
 fn is_chrome_running() -> bool {
-    match Command::new("tasklist")
+    match nowin_cmd("tasklist")
         .args(["/FI", "IMAGENAME eq chrome.exe", "/NH"])
         .output()
     {
@@ -119,7 +133,7 @@ fn is_chrome_running() -> bool {
 
 fn get_chrome_pids() -> Vec<u32> {
     let mut pids = Vec::new();
-    match Command::new("tasklist")
+    match nowin_cmd("tasklist")
         .args(["/FI", "IMAGENAME eq chrome.exe", "/FO", "CSV"])
         .output()
     {
@@ -344,7 +358,7 @@ pub fn opencode_refresh_cookie() -> Result<RefreshResult, String> {
 
     let user_data_dir = get_user_data_dir();
 
-    let _child = Command::new(CHROME_EXE)
+    let _child = nowin_cmd(CHROME_EXE)
         .args([
             "--headless=new",
             "--no-first-run",
@@ -412,7 +426,7 @@ fn kill_new_chrome_processes(before: &[u32]) -> Result<(), String> {
     let after = get_chrome_pids();
     for pid in &after {
         if !before.contains(pid) {
-            let _ = Command::new("taskkill")
+            let _ = nowin_cmd("taskkill")
                 .args(["/F", "/PID", &pid.to_string(), "/T"])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())

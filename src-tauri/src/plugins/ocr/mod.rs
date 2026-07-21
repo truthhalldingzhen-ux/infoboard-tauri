@@ -105,7 +105,14 @@ impl OcrEngine {
             .parent()
             .ok_or_else(|| "引擎路径无效".to_string())?;
 
-        let mut child = Command::new(&self.engine_path)
+        let mut cmd = Command::new(&self.engine_path);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            unsafe { cmd.creation_flags(CREATE_NO_WINDOW); }
+        }
+        let mut child = cmd
             .current_dir(engine_dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
