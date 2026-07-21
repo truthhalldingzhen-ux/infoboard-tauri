@@ -7,6 +7,7 @@ use tauri::AppHandle;
 
 const ALLOWED_HOST_SUFFIXES: &[&str] = &[
     "qweather.com",
+    "qweatherapi.com",
     "heweather.net",
     "api.bilibili.com",
     "search.bilibili.com",
