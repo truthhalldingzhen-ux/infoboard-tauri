@@ -1,264 +1,410 @@
 //! 小牛翻译插件
 //!
-//! 提供 6 个 Tauri command：
-//! - niutrans_translate — 调用小牛翻译 API v2
-//! - niutrans_set_api_key / niutrans_set_app_id — 存储凭据
-//! - niutrans_has_api_key — 检查凭据
-//! - niutrans_get_config — 获取凭据掩码
-//! - niutrans_get_char_count — 累计翻译字符数
+//! 官方 v2：POST https://api.niutrans.com/v2/text/translate
+//! body: { from, to, srcText, appId, timestamp, authStr }
+//! authStr = md5( 参数按 key 字典序 key=value&... ，签名时含 apikey )
 
-pub mod types;
-
-use std::sync::Arc;
 use md5::{Digest, Md5};
-use reqwest::Client;
+use serde::Deserialize;
+use std::collections::BTreeMap;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
-use types::{TranslateConfig, TranslateResult};
 
-/// 小牛翻译 API 地址
-const NIUTRANS_API_URL: &str = "https://api.niutrans.com/v2/text/translate";
+mod types;
+use types::*;
 
-/// Store 文件名
-const STORE_FILE: &str = "niutrans.json";
+const STORE_PATH: &str = "niutrans.json";
+const STORE_KEY_APP_ID: &str = "appId";
+const STORE_KEY_API_KEY: &str = "apiKey";
+const STORE_KEY_CHAR_COUNT: &str = "charCount";
 
-// ── Helper ──────────────────────────────────────────────
+const API_V2: &str = "https://api.niutrans.com/v2/text/translate";
+const API_LEGACY: &str = "https://api.niutrans.com/NiuTransServer/translation";
 
-/// 计算小牛翻译 API MD5 签名
-///
-/// 算法：`sort(params) → join("&") → "apikey=$key&$params" → md5`
-fn calculate_sign(api_key: &str, params: &[(&str, &str)]) -> String {
-    let mut sorted = params.to_vec();
-    sorted.sort_by(|a, b| a.0.cmp(b.0));
+// ─── Store ───
 
-    let param_str = sorted
+fn read_field(app: &AppHandle, key: &str) -> Result<String, String> {
+    let store = app
+        .store(STORE_PATH)
+        .map_err(|e| format!("打开配置失败: {e}"))?;
+    Ok(store
+        .get(key)
+        .and_then(|v| v.as_str().map(|s| s.to_string()))
+        .unwrap_or_default())
+}
+
+fn write_field(app: &AppHandle, key: &str, value: &str) -> Result<(), String> {
+    let store = app
+        .store(STORE_PATH)
+        .map_err(|e| format!("打开配置失败: {e}"))?;
+    store.set(key, serde_json::json!(value));
+    store
+        .save()
+        .map_err(|e| format!("保存配置失败: {e}"))?;
+    Ok(())
+}
+
+fn read_char_count(app: &AppHandle) -> Result<u64, String> {
+    let store = app
+        .store(STORE_PATH)
+        .map_err(|e| format!("打开配置失败: {e}"))?;
+    Ok(store
+        .get(STORE_KEY_CHAR_COUNT)
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0))
+}
+
+fn add_char_count(app: &AppHandle, n: u64) -> Result<(), String> {
+    let store = app
+        .store(STORE_PATH)
+        .map_err(|e| format!("打开配置失败: {e}"))?;
+    let cur = store
+        .get(STORE_KEY_CHAR_COUNT)
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    store.set(STORE_KEY_CHAR_COUNT, serde_json::json!(cur + n));
+    store
+        .save()
+        .map_err(|e| format!("保存配置失败: {e}"))?;
+    Ok(())
+}
+
+fn mask_secret(s: &str) -> String {
+    if s.is_empty() {
+        return String::new();
+    }
+    let prefix: String = s.chars().take(4).collect();
+    format!("{prefix}***")
+}
+
+// ─── 签名 ───
+
+fn md5_hex(input: &str) -> String {
+    let mut hasher = Md5::new();
+    hasher.update(input.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+/// 小牛 v2 authStr
+fn make_auth_str(params: &BTreeMap<String, String>) -> String {
+    let s: String = params
         .iter()
-        .map(|(k, v)| format!("{}={}", k, v))
+        .filter(|(_, v)| !v.is_empty())
+        .map(|(k, v)| format!("{k}={v}"))
         .collect::<Vec<_>>()
         .join("&");
-
-    let sign_str = format!("apikey={}&{}", api_key, param_str);
-    let hash = Md5::digest(sign_str.as_bytes());
-    format!("{:x}", hash)
+    md5_hex(&s)
 }
 
-/// 从 Store 中读取字符串值
-fn store_get_string(store: &tauri_plugin_store::Store<tauri::Wry>, key: &str) -> Option<String> {
-    store
-        .get(key)
-        .and_then(|v| v.as_str().map(String::from))
+fn now_unix() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
-/// 从 Store 中读取 u64 值
-fn store_get_u64(store: &tauri_plugin_store::Store<tauri::Wry>, key: &str) -> u64 {
-    store.get(key).and_then(|v| v.as_u64()).unwrap_or(0)
-}
+fn build_client() -> Result<reqwest::Client, String> {
+    let mut builder = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .connect_timeout(Duration::from_secs(10))
+        .user_agent("InfoBoard/0.1");
 
-/// 获取 Store 实例
-fn get_store(app: &AppHandle) -> Result<Arc<tauri_plugin_store::Store<tauri::Wry>>, String> {
-    app.store(STORE_FILE).map_err(|e| format!("无法打开 Store: {}", e))
-}
-
-// ── Commands ────────────────────────────────────────────
-
-/// 1. 翻译文本
-#[tauri::command]
-pub async fn niutrans_translate(
-    app: AppHandle,
-    text: String,
-    target_lang: String,
-) -> Result<TranslateResult, String> {
-    println!("[翻译] 请求翻译 (目标语言: {})", target_lang);
-    let store = get_store(&app)?;
-    let api_key = store_get_string(&store, "apiKey")
-        .ok_or_else(|| "API_KEY_MISSING".to_string())?;
-    let _app_id = store_get_string(&store, "appId")
-        .ok_or_else(|| "API_KEY_MISSING".to_string())?;
-
-    // 准备签名参数（不含 apikey）
-    let params = &[
-        ("from", "auto"),
-        ("to", target_lang.as_str()),
-        ("src_text", text.as_str()),
+    // 优先环境变量，其次本机常见代理
+    let proxy_candidates = [
+        std::env::var("HTTPS_PROXY").ok(),
+        std::env::var("HTTP_PROXY").ok(),
+        Some("http://127.0.0.1:7897".into()),
+        Some("http://127.0.0.1:7890".into()),
     ];
+    for p in proxy_candidates.into_iter().flatten() {
+        if p.trim().is_empty() {
+            continue;
+        }
+        if let Ok(proxy) = reqwest::Proxy::all(&p) {
+            builder = builder.proxy(proxy);
+            break;
+        }
+    }
 
-    let sign = calculate_sign(&api_key, params);
+    builder
+        .build()
+        .map_err(|e| format!("HTTP 客户端创建失败: {e}"))
+}
 
-    // 构建请求体（含 apikey + sign）
+// ─── 翻译 ───
+
+async fn translate_v2(
+    client: &reqwest::Client,
+    app_id: &str,
+    api_key: &str,
+    text: &str,
+    from: &str,
+    to: &str,
+) -> Result<String, String> {
+    let timestamp = now_unix();
+    let mut sign_params = BTreeMap::new();
+    sign_params.insert("appId".into(), app_id.to_string());
+    sign_params.insert("apikey".into(), api_key.to_string());
+    sign_params.insert("from".into(), from.to_string());
+    sign_params.insert("srcText".into(), text.to_string());
+    sign_params.insert("timestamp".into(), timestamp.to_string());
+    sign_params.insert("to".into(), to.to_string());
+
+    let auth_str = make_auth_str(&sign_params);
+
     let body = serde_json::json!({
-        "from": "auto",
-        "to": target_lang,
-        "apikey": api_key,
-        "src_text": text,
-        "sign": sign,
+        "from": from,
+        "to": to,
+        "srcText": text,
+        "appId": app_id,
+        "timestamp": timestamp,
+        "authStr": auth_str,
     });
 
-    let client = Client::new();
     let resp = client
-        .post(NIUTRANS_API_URL)
+        .post(API_V2)
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("网络请求失败: {e}"))?;
+
+    let status = resp.status();
+    let raw = resp
+        .text()
+        .await
+        .map_err(|e| format!("读取响应失败: {e}"))?;
+
+    if !status.is_success() {
+        return Err(format!(
+            "HTTP {}: {}",
+            status.as_u16(),
+            raw.chars().take(160).collect::<String>()
+        ));
+    }
+
+    let v: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| format!("JSON 解析失败: {e}"))?;
+
+    if let Some(t) = v
+        .get("tgtText")
+        .or_else(|| v.get("tgt_text"))
+        .and_then(|x| x.as_str())
+        .filter(|s| !s.is_empty())
+    {
+        return Ok(t.to_string());
+    }
+
+    let code = v
+        .get("errorCode")
+        .or_else(|| v.get("error_code"))
+        .or_else(|| v.get("code"))
+        .and_then(|x| x.as_str().map(|s| s.to_string()).or_else(|| x.as_i64().map(|n| n.to_string())))
+        .unwrap_or_else(|| "?".into());
+    let msg = v
+        .get("errorMsg")
+        .or_else(|| v.get("error_msg"))
+        .or_else(|| v.get("message"))
+        .and_then(|x| x.as_str())
+        .unwrap_or("未知错误");
+    Err(format!("小牛翻译错误 [{code}]: {msg}"))
+}
+
+async fn translate_legacy(
+    client: &reqwest::Client,
+    api_key: &str,
+    text: &str,
+    from: &str,
+    to: &str,
+) -> Result<String, String> {
+    let body = serde_json::json!({
+        "from": from,
+        "to": to,
+        "apikey": api_key,
+        "src_text": text,
+    });
+
+    let resp = client
+        .post(API_LEGACY)
         .header("Content-Type", "application/json")
         .json(&body)
         .send()
         .await
-        .map_err(|e| format!("请求失败: {}", e))?;
+        .map_err(|e| format!("网络请求失败: {e}"))?;
 
-    let status = resp.status();
-    let response_text = resp.text().await.map_err(|e| format!("读取响应失败: {}", e))?;
+    let raw = resp
+        .text()
+        .await
+        .map_err(|e| format!("读取响应失败: {e}"))?;
 
-    if !status.is_success() {
-        return Err(format!("API 返回错误 ({}): {}", status.as_u16(), response_text));
+    let v: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| format!("JSON 解析失败: {e}"))?;
+
+    if let Some(code) = v.get("error_code").and_then(|x| x.as_str()) {
+        if code != "0" && !code.is_empty() {
+            let msg = v
+                .get("error_msg")
+                .and_then(|x| x.as_str())
+                .unwrap_or("未知错误");
+            return Err(format!("小牛翻译错误 [{code}]: {msg}"));
+        }
     }
 
-    // 解析响应
-    let json: serde_json::Value =
-        serde_json::from_str(&response_text).map_err(|e| format!("解析响应失败: {}", e))?;
-
-    // 检查错误码
-    if let Some(err_code) = json.get("error_code").and_then(|v| v.as_i64()) {
-        let err_msg = json
-            .get("error_msg")
-            .and_then(|v| v.as_str())
-            .unwrap_or("未知错误");
-        return Err(format!("API 错误 ({}): {}", err_code, err_msg));
+    if let Some(t) = v
+        .get("tgt_text")
+        .or_else(|| v.get("tgtText"))
+        .and_then(|x| x.as_str())
+        .filter(|s| !s.is_empty())
+    {
+        return Ok(t.to_string());
     }
 
-    let result = TranslateResult {
-        text: json["tgt_text"]
-            .as_str()
-            .ok_or("响应缺少 tgt_text")?
-            .to_string(),
-        from: json["from"]
-            .as_str()
-            .unwrap_or("auto")
-            .to_string(),
-        to: json["to"]
-            .as_str()
-            .unwrap_or(&target_lang)
-            .to_string(),
-    };
-
-    // 累加字符数
-    let char_count = text.chars().count() as u64;
-    let current = store_get_u64(&store, "charCount");
-    store.set("charCount", serde_json::json!(current + char_count));
-    store.save().map_err(|e| format!("保存用量失败: {}", e))?;
-
-    Ok(result)
+    Err(format!(
+        "响应无法解析: {}",
+        raw.chars().take(200).collect::<String>()
+    ))
 }
 
-/// 2. 设置 API Key
+// ─── Commands（保持与 bridge.ts / lib.rs 一致）───
+
 #[tauri::command]
 pub async fn niutrans_set_api_key(app: AppHandle, key: String) -> Result<(), String> {
-    let store = get_store(&app)?;
-    store.set("apiKey", serde_json::json!(key));
-    store.save().map_err(|e| format!("保存失败: {}", e))
+    write_field(&app, STORE_KEY_API_KEY, key.trim())
 }
 
-/// 3. 设置 App ID
 #[tauri::command]
-pub async fn niutrans_set_app_id(app: AppHandle, id: String) -> Result<(), String> {
-    let store = get_store(&app)?;
-    store.set("appId", serde_json::json!(id));
-    store.save().map_err(|e| format!("保存失败: {}", e))
+pub async fn niutrans_set_app_id(app: AppHandle, app_id: String) -> Result<(), String> {
+    write_field(&app, STORE_KEY_APP_ID, app_id.trim())
 }
 
-/// 4. 检查是否已配置 API Key 和 App ID
 #[tauri::command]
 pub async fn niutrans_has_api_key(app: AppHandle) -> Result<bool, String> {
-    let store = get_store(&app)?;
-    let has_key = store_get_string(&store, "apiKey").is_some()
-        && store_get_string(&store, "appId").is_some();
-    Ok(has_key)
+    let key = read_field(&app, STORE_KEY_API_KEY)?;
+    Ok(!key.is_empty())
 }
 
-/// 5. 获取配置信息（带掩码）
 #[tauri::command]
 pub async fn niutrans_get_config(app: AppHandle) -> Result<TranslateConfig, String> {
-    let store = get_store(&app)?;
-    let api_key = store_get_string(&store, "apiKey").unwrap_or_default();
-    let app_id = store_get_string(&store, "appId").unwrap_or_default();
-    let has_key = !api_key.is_empty() && !app_id.is_empty();
-
-    let mask = |s: &str| -> String {
-        if s.len() <= 4 {
-            s.to_string()
-        } else {
-            format!("{}***", &s[..4])
-        }
-    };
-
+    let app_id = read_field(&app, STORE_KEY_APP_ID)?;
+    let api_key = read_field(&app, STORE_KEY_API_KEY)?;
     Ok(TranslateConfig {
-        has_key,
-        app_id: mask(&app_id),
-        api_key_mask: mask(&api_key),
+        has_key: !api_key.is_empty(),
+        app_id: mask_secret(&app_id),
+        api_key_mask: mask_secret(&api_key),
     })
 }
 
-/// 6. 获取累计翻译字符数
 #[tauri::command]
 pub async fn niutrans_get_char_count(app: AppHandle) -> Result<u64, String> {
-    let store = get_store(&app)?;
-    Ok(store_get_u64(&store, "charCount"))
+    read_char_count(&app)
 }
 
-// ── Tests ───────────────────────────────────────────────
+#[tauri::command]
+pub async fn niutrans_translate(
+    app: AppHandle,
+    text: String,
+    from: String,
+    to: String,
+) -> Result<TranslateResult, String> {
+    let text = text.trim().to_string();
+    if text.is_empty() {
+        return Err("翻译文本不能为空".into());
+    }
+    if text.chars().count() > 5000 {
+        return Err("单次翻译不能超过 5000 字符".into());
+    }
+
+    let api_key = read_field(&app, STORE_KEY_API_KEY)?;
+    if api_key.is_empty() {
+        return Err("未配置小牛翻译 API Key（设置 → 小牛翻译）".into());
+    }
+    let app_id = read_field(&app, STORE_KEY_APP_ID)?;
+
+    let client = build_client()?;
+    crate::core::app_log::emit(
+        &app,
+        "info",
+        &format!(
+            "[niutrans] 翻译 {}→{} len={} hasAppId={}",
+            from,
+            to,
+            text.chars().count(),
+            !app_id.is_empty()
+        ),
+    );
+
+    let translated = if !app_id.is_empty() {
+        match translate_v2(&client, &app_id, &api_key, &text, &from, &to).await {
+            Ok(t) => t,
+            Err(e) => {
+                crate::core::app_log::emit(
+                    &app,
+                    "warn",
+                    &format!("[niutrans] v2 失败，尝试 legacy: {e}"),
+                );
+                translate_legacy(&client, &api_key, &text, &from, &to)
+                    .await
+                    .map_err(|e2| format!("{e} | legacy: {e2}"))?
+            }
+        }
+    } else {
+        // 无 appId：先 legacy，再提示
+        translate_legacy(&client, &api_key, &text, &from, &to)
+            .await
+            .map_err(|e| {
+                format!("{e}（若你使用签名版 Key，请在设置中同时填写 App ID）")
+            })?
+    };
+
+    let _ = add_char_count(&app, text.chars().count() as u64);
+    crate::core::app_log::emit(
+        &app,
+        "info",
+        &format!(
+            "[niutrans] 成功 out_len={}",
+            translated.chars().count()
+        ),
+    );
+
+    Ok(TranslateResult {
+        text: translated,
+        from,
+        to,
+    })
+}
+
+// ─── 测试 ───
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_calculate_sign() {
-        let api_key = "test_key_123";
-        let params = &[
-            ("from", "auto"),
-            ("to", "zh"),
-            ("src_text", "hello"),
-        ];
-
-        let sign = calculate_sign(api_key, params);
-
-        // 验证签名非空且为 32 位 hex
-        assert_eq!(sign.len(), 32);
-        assert!(sign.chars().all(|c| c.is_ascii_hexdigit()));
-
-        // 验证确定性：相同输入得到相同输出
-        let sign2 = calculate_sign(api_key, params);
-        assert_eq!(sign, sign2);
-
-        // 验证不同输入得到不同输出
-        let params3 = &[
-            ("from", "auto"),
-            ("to", "en"),
-            ("src_text", "hello"),
-        ];
-        let sign3 = calculate_sign(api_key, params3);
-        assert_ne!(sign, sign3);
+    fn test_auth_str_stable() {
+        let mut p = BTreeMap::new();
+        p.insert("appId".into(), "id1".into());
+        p.insert("apikey".into(), "key1".into());
+        p.insert("from".into(), "en".into());
+        p.insert("srcText".into(), "hi".into());
+        p.insert("timestamp".into(), "100".into());
+        p.insert("to".into(), "zh".into());
+        let s1 = make_auth_str(&p);
+        let s2 = make_auth_str(&p);
+        assert_eq!(s1, s2);
+        assert_eq!(s1.len(), 32);
+        // 拼接串固定
+        let expected = md5_hex("appId=id1&apikey=key1&from=en&srcText=hi&timestamp=100&to=zh");
+        assert_eq!(s1, expected);
     }
 
     #[test]
-    fn test_calculate_sign_ordering() {
-        // 验证参数顺序不影响结果（函数内部会排序）
-        let api_key = "k";
-        let params_a = &[("b", "2"), ("a", "1"), ("c", "3")];
-        let params_b = &[("c", "3"), ("a", "1"), ("b", "2")];
-
-        assert_eq!(calculate_sign(api_key, params_a), calculate_sign(api_key, params_b));
-    }
-
-    #[test]
-    fn test_mask_short_string() {
-        // mask 是内部闭包，通过 get_config 行为间接验证
-        // 直接测试掩码逻辑
-        let s = "abc";
-        let result = if s.len() <= 4 { s.to_string() } else { format!("{}***", &s[..4]) };
-        assert_eq!(result, "abc");
-    }
-
-    #[test]
-    fn test_mask_long_string() {
-        let s = "abcdefgh";
-        let result = if s.len() <= 4 { s.to_string() } else { format!("{}***", &s[..4]) };
-        assert_eq!(result, "abcd***");
+    fn test_auth_skips_empty() {
+        let mut p = BTreeMap::new();
+        p.insert("a".into(), "1".into());
+        p.insert("b".into(), "".into());
+        p.insert("c".into(), "3".into());
+        assert_eq!(make_auth_str(&p), md5_hex("a=1&c=3"));
     }
 }
