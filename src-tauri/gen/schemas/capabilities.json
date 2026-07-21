@@ -13,7 +13,12 @@
       "core:window:allow-show",
       "core:window:allow-set-focus",
       "store:default",
-      "window-state:default"
+      "window-state:default",
+      "clipboard-manager:default",
+      "clipboard-manager:allow-write-text",
+      "clipboard-manager:allow-read-text",
+      "autostart:default",
+      "global-shortcut:default"
     ]
   }
 }

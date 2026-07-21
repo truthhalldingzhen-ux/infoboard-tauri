@@ -63,7 +63,12 @@ export function initTauriShim() {
           return r
         })
         .catch((e) => {
-          console.error('[opencode] getMiniMax 失败:', e)
+          const msg = String(e)
+          if (msg.includes('未配置 MiniMax')) {
+            console.warn('[opencode] MiniMax 未配置，已跳过')
+          } else {
+            console.error('[opencode] getMiniMax 失败:', e)
+          }
           throw e
         })
     },

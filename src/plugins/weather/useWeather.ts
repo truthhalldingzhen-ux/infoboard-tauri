@@ -19,6 +19,7 @@ import type {
   QWeatherDailyResponse,
   QWeatherHourlyResponse,
 } from './types'
+import { httpGetJson } from '../../core/http-client'
 import {
   QWEATHER_API_HOST,
   QWEATHER_API_KEY,
@@ -303,6 +304,13 @@ export function useWeather(): UseWeatherReturn {
       console.log('[天气] 城市:', cityName, 'locationParam:', locationParam)
       console.log('[天气] API 配置: host=', host, 'key 长度=', key?.length || 0)
 
+      if (!key || !key.trim()) {
+        setLoading(false)
+        setError('未配置天气 API Key（请在设置中填写和风 Key）')
+        console.warn('[天气] 未配置 API Key，跳过请求')
+        return
+      }
+
       // 离线时跳过请求
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
         console.log('[天气] 检测到离线状态，跳过请求')
@@ -341,45 +349,47 @@ export function useWeather(): UseWeatherReturn {
         console.log('[天气] now URL:', urls[0].replace(key, '***'))
         console.log('[天气] 3d URL:', urls[1].replace(key, '***'))
 
+        // 经 Rust 代理请求（打包后 WebView 直连常失败 → status 0）
         const [nowRes, dailyRes, hourlyRes] = await Promise.allSettled([
-          fetch(urls[0], {
-            signal: controller.signal,
-          }),
-          fetch(urls[1], {
-            signal: controller.signal,
-          }),
-          fetch(urls[2], {
-            signal: controller.signal,
-          }),
+          httpGetJson<QWeatherNowResponse>(urls[0], controller.signal),
+          httpGetJson<QWeatherDailyResponse>(urls[1], controller.signal),
+          httpGetJson<QWeatherHourlyResponse>(urls[2], controller.signal),
         ])
 
         console.log(
           '[天气] now 状态:',
           nowRes.status,
-          nowRes.status === 'fulfilled' ? nowRes.value.status : 'fetch_failed'
+          nowRes.status === 'fulfilled' ? 'ok' : String((nowRes as PromiseRejectedResult).reason)
         )
         console.log(
           '[天气] daily 状态:',
           dailyRes.status,
-          dailyRes.status === 'fulfilled' ? dailyRes.value.status : 'fetch_failed'
+          dailyRes.status === 'fulfilled'
+            ? 'ok'
+            : String((dailyRes as PromiseRejectedResult).reason)
         )
         console.log(
           '[天气] hourly 状态:',
           hourlyRes.status,
-          hourlyRes.status === 'fulfilled' ? hourlyRes.value.status : 'fetch_failed'
+          hourlyRes.status === 'fulfilled'
+            ? 'ok'
+            : String((hourlyRes as PromiseRejectedResult).reason)
         )
 
-        if (nowRes.status !== 'fulfilled' || !nowRes.value.ok) {
-          const code = nowRes.status === 'fulfilled' ? nowRes.value.status : 0
-          throw new Error(`实时天气请求失败 (${code})`)
+        if (nowRes.status !== 'fulfilled') {
+          const reason = String(nowRes.reason || '')
+          if (!key) {
+            throw new Error('未配置天气 API Key（设置 → 天气 API）')
+          }
+          throw new Error(`实时天气请求失败: ${reason || '网络错误'}`)
         }
-        if (dailyRes.status !== 'fulfilled' || !dailyRes.value.ok) {
-          const code = dailyRes.status === 'fulfilled' ? dailyRes.value.status : 0
-          throw new Error(`预报数据请求失败 (${code})`)
+        if (dailyRes.status !== 'fulfilled') {
+          const reason = String(dailyRes.reason || '')
+          throw new Error(`预报数据请求失败: ${reason || '网络错误'}`)
         }
 
-        const nowData: QWeatherNowResponse = await nowRes.value.json()
-        const dailyData: QWeatherDailyResponse = await dailyRes.value.json()
+        const nowData: QWeatherNowResponse = nowRes.value
+        const dailyData: QWeatherDailyResponse = dailyRes.value
         console.log(
           '[天气] nowData.code:',
           nowData.code,
@@ -394,12 +404,8 @@ export function useWeather(): UseWeatherReturn {
         )
         let hourlyData: QWeatherHourlyResponse | null = null
 
-        if (hourlyRes.status === 'fulfilled' && hourlyRes.value.ok) {
-          try {
-            hourlyData = await hourlyRes.value.json()
-          } catch {
-            /* 逐时预报解析失败不阻塞主流程 */
-          }
+        if (hourlyRes.status === 'fulfilled') {
+          hourlyData = hourlyRes.value
         }
 
         // 检查和风天气业务状态码

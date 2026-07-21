@@ -3,6 +3,7 @@ use tauri_plugin_window_state::{WindowExt, StateFlags};
 
 mod core {
     pub mod app_log;
+    pub mod http_proxy;
     pub mod autostart;
     pub mod geolocate;
     pub mod toast;
@@ -80,6 +81,7 @@ pub fn run() {
             greet,
             core::app_log::log_get_path,
             core::app_log::log_append_file,
+            core::http_proxy::http_proxy_get,
             core::autostart::autostart_is_enabled,
             core::autostart::autostart_set_enabled,
             core::window::window_minimize,

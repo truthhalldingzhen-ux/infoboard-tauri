@@ -8,7 +8,8 @@
 
 import { useState, useCallback, useRef } from 'react'
 import type { CityInfo, UseLocationSearchReturn } from './types'
-import { QWEATHER_API_HOST, QWEATHER_API_KEY } from './config'
+import { httpGetJson } from '../../core/http-client'
+import { QWEATHER_API_HOST, QWEATHER_API_KEY, GEO_API_HOST } from './config'
 
 /** 从设置读取 API 配置 */
 function getApiConfig(): { host: string; key: string } {
@@ -40,17 +41,11 @@ async function reverseGeocode(lat: number, lon: number): Promise<CityInfo | null
   }
 
   try {
-    const url = `https://${host}/geo/v2/city/lookup?location=${lon.toFixed(2)},${lat.toFixed(2)}&key=${key}&lang=zh&number=1`
+    const geoHost = host.includes('geoapi') ? host : GEO_API_HOST
+    const url = `https://${geoHost}/geo/v2/city/lookup?location=${lon.toFixed(2)},${lat.toFixed(2)}&key=${key}&lang=zh&number=1`
     console.log('[天气插件] GeoAPI 请求:', url)
-    const res = await fetch(url, { signal: AbortSignal.timeout(8000) })
-    console.log('[天气插件] GeoAPI 响应状态:', res.status)
-
-    if (!res.ok) {
-      console.warn('[天气插件] GeoAPI HTTP 错误:', res.status, res.statusText)
-      return null
-    }
-
-    const data = await res.json()
+    // Geo 接口 host 通常是 geoapi.qweather.com
+    const data = await httpGetJson<{ code: string; location?: Array<Record<string, string>> }>(url)
     console.log('[天气插件] GeoAPI 响应数据:', JSON.stringify(data).slice(0, 300))
 
     if (data.code !== '200' || !data.location?.length) {
@@ -201,12 +196,12 @@ export function useLocationSearch(): UseLocationSearchReturn & {
 
       try {
         const { host, key } = getApiConfig()
-        const url = `https://${host}/geo/v2/city/lookup?location=${encodeURIComponent(query.trim())}&key=${key}&lang=zh&number=8`
-        const res = await fetch(url, { signal: controller.signal })
-
-        if (!res.ok) throw new Error(`搜索请求失败 (${res.status})`)
-
-        const data = await res.json()
+        const geoHost = host.includes('geoapi') ? host : GEO_API_HOST
+        const url = `https://${geoHost}/geo/v2/city/lookup?location=${encodeURIComponent(query.trim())}&key=${key}&lang=zh&number=8`
+        const data = await httpGetJson<{
+          code: string
+          location?: Array<Record<string, string>>
+        }>(url, controller.signal)
 
         if (data.code !== '200') {
           console.warn('[天气插件] GeoAPI 返回:', data.code)

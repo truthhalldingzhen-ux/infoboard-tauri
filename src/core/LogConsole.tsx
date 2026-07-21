@@ -83,14 +83,34 @@ export default function LogConsole({ open, onClose }: LogConsoleProps) {
 
   const handleCopy = useCallback(async () => {
     const text = exportLogsText()
+    if (!text) {
+      console.warn('[LogConsole] 无日志可复制')
+      return
+    }
     try {
       await writeText(text)
-      console.info('[LogConsole] 已复制全部日志到剪贴板')
-    } catch {
+      console.info(`[LogConsole] 已复制 ${text.split('\n').length} 行日志到剪贴板`)
+      window.dispatchEvent(
+        new CustomEvent('toast-show', {
+          detail: { message: '日志已复制到剪贴板', color: '#4ADE80', duration: 2500 },
+        })
+      )
+    } catch (e1) {
       try {
         await navigator.clipboard.writeText(text)
-      } catch (e) {
-        console.error('[LogConsole] 复制失败', e)
+        console.info('[LogConsole] 已通过 navigator.clipboard 复制')
+        window.dispatchEvent(
+          new CustomEvent('toast-show', {
+            detail: { message: '日志已复制到剪贴板', color: '#4ADE80', duration: 2500 },
+          })
+        )
+      } catch (e2) {
+        console.error('[LogConsole] 复制失败', e1, e2)
+        window.dispatchEvent(
+          new CustomEvent('toast-show', {
+            detail: { message: '复制失败，请检查剪贴板权限', color: '#ef4444', duration: 3000 },
+          })
+        )
       }
     }
   }, [])
