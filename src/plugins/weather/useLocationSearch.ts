@@ -29,6 +29,28 @@ function getApiConfig(): { host: string; key: string } {
 }
 
 /**
+ * 解析 GeoAPI Host
+ * - 和风新版自定义域名（*.qweatherapi.com）：天气与 Geo 同一 Host
+ * - 旧版固定域名：devapi/api.qweather.com → geoapi.qweather.com
+ */
+function resolveGeoHost(apiHost: string): string {
+  const h = apiHost.toLowerCase()
+  if (h.includes('geoapi')) return apiHost
+  // 新控制台自定义 API Host
+  if (h.includes('qweatherapi.com')) return apiHost
+  // 旧版公共域名
+  if (h.includes('qweather.com') || h.includes('heweather.net')) {
+    return GEO_API_HOST
+  }
+  // 其它自定义 host：默认与天气同域
+  return apiHost
+}
+
+function maskUrlKey(url: string): string {
+  return url.replace(/([?&]key=)[^&]*/i, '$1***')
+}
+
+/**
  * 用和风天气 GeoAPI 通过坐标反查地区（精确到区/街道）
  * 端点：GET /geo/v2/city/lookup?location={lon},{lat}
  */
@@ -41,9 +63,9 @@ async function reverseGeocode(lat: number, lon: number): Promise<CityInfo | null
   }
 
   try {
-    const geoHost = host.includes('geoapi') ? host : GEO_API_HOST
+    const geoHost = resolveGeoHost(host)
     const url = `https://${geoHost}/geo/v2/city/lookup?location=${lon.toFixed(2)},${lat.toFixed(2)}&key=${key}&lang=zh&number=1`
-    console.log('[天气插件] GeoAPI 请求:', url)
+    console.log('[天气插件] GeoAPI 请求:', maskUrlKey(url), 'geoHost=', geoHost)
     // Geo 接口 host 通常是 geoapi.qweather.com
     const data = await httpGetJson<{ code: string; location?: Array<Record<string, string>> }>(url)
     console.log('[天气插件] GeoAPI 响应数据:', JSON.stringify(data).slice(0, 300))
@@ -55,9 +77,14 @@ async function reverseGeocode(lat: number, lon: number): Promise<CityInfo | null
 
     const loc = data.location[0]
     console.log('[天气插件] GeoAPI 反查成功:', loc.name, loc.adm2, loc.id)
+    // 显示名：区名 · 市名（如 中原 · 郑州）
+    const displayName =
+      loc.adm2 && loc.name && loc.adm2 !== loc.name
+        ? `${loc.name} · ${loc.adm2}`
+        : loc.name || loc.adm2 || '未知地点'
     return {
       locationId: loc.id,
-      name: loc.name,
+      name: displayName,
       adm2: loc.adm2,
       adm1: loc.adm1,
       country: loc.country,
@@ -196,8 +223,9 @@ export function useLocationSearch(): UseLocationSearchReturn & {
 
       try {
         const { host, key } = getApiConfig()
-        const geoHost = host.includes('geoapi') ? host : GEO_API_HOST
+        const geoHost = resolveGeoHost(host)
         const url = `https://${geoHost}/geo/v2/city/lookup?location=${encodeURIComponent(query.trim())}&key=${key}&lang=zh&number=8`
+        console.log('[天气插件] 城市搜索:', maskUrlKey(url))
         const data = await httpGetJson<{
           code: string
           location?: Array<Record<string, string>>
