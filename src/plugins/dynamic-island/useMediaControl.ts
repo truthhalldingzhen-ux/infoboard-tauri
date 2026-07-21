@@ -194,24 +194,39 @@ async function enrichBilibiliSession(session: MediaSession): Promise<MediaSessio
   // 调用 Tauri invoke 获取B站视频信息
   try {
     const info = await enrichMedia(title)
-    if (!info) return session
+    if (!info) {
+      console.debug('[B站] 封面补全：API 无结果')
+      return session
+    }
+
+    // B站封面/头像 API 返回的可能是 http://，WebView 可能被 CSP/mixed content 拦截 → 升级为 https
+    const safeUrl = (url: string): string => url.replace(/^http:\/\//, 'https://')
+
+    const thumbnail = safeUrl(info.cover) || session.thumbnail || ''
+    const ownerAvatar = safeUrl(info.ownerAvatar || '')
 
     // 写入缓存
     bilibiliCache.set(title, {
-      thumbnail: info.cover,
+      thumbnail,
       artist: info.ownerName,
-      ownerAvatar: info.ownerAvatar,
+      ownerAvatar,
       expires: Date.now() + BILI_CACHE_TTL,
+    })
+
+    console.debug('[B站] 封面补全成功', {
+      title,
+      thumbnail: (thumbnail || '').slice(0, 60),
+      owner: info.ownerName,
     })
 
     return {
       ...session,
-      thumbnail: info.cover || session.thumbnail,
+      thumbnail,
       artist: info.ownerName || session.artist,
-      ownerAvatar: info.ownerAvatar,
+      ownerAvatar,
     }
   } catch (err) {
-    console.error('[useMediaControl] B站信息补充失败:', err)
+    console.warn('[useMediaControl] B站信息补充失败:', err)
     return session
   }
 }

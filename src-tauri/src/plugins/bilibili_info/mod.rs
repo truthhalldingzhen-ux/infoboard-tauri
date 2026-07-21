@@ -228,10 +228,13 @@ async fn get_view(client: &reqwest::Client, bvid: &str) -> Result<BilibiliVideoI
         danmaku: None,
     });
 
+    // B站 API 可能返回 http:// 封面/头像 → 升级为 https 避免 WebView CSP 拦截
+    let cover = data.pic.unwrap_or_default().replace("http://", "https://");
+    let owner_avatar = owner.face.unwrap_or_default().replace("http://", "https://");
     Ok(BilibiliVideoInfo {
-        cover: data.pic.unwrap_or_default(),
+        cover,
         owner_name: owner.name.unwrap_or_default(),
-        owner_avatar: owner.face.unwrap_or_default(),
+        owner_avatar,
         bvid: bvid.to_string(),
         play_count: stat.view.unwrap_or(0),
         danmaku_count: stat.danmaku.unwrap_or(0),
@@ -248,12 +251,12 @@ pub async fn bilibili_enrich_media(title: String) -> Option<BilibiliVideoInfo> {
         return None;
     }
 
-    eprintln!("[bilibili_enrich_media] 搜索: {clean}");
+    println!("[bilibili_enrich_media] 搜索: {clean}");
 
     let client = match build_client() {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("[bilibili_enrich_media] 客户端失败: {e}");
+            println!("[bilibili_enrich_media] 客户端失败: {e}");
             return None;
         }
     };
@@ -261,13 +264,13 @@ pub async fn bilibili_enrich_media(title: String) -> Option<BilibiliVideoInfo> {
     let results = match search_video(&client, &clean).await {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("[bilibili_enrich_media] 搜索失败: {e}");
+            println!("[bilibili_enrich_media] 搜索失败: {e}");
             return None;
         }
     };
 
     if results.is_empty() {
-        eprintln!("[bilibili_enrich_media] 无搜索结果");
+        println!("[bilibili_enrich_media] 无搜索结果");
         return None;
     }
 
@@ -288,7 +291,7 @@ pub async fn bilibili_enrich_media(title: String) -> Option<BilibiliVideoInfo> {
             Some(info)
         }
         Err(e) => {
-            eprintln!("[bilibili_enrich_media] 详情失败: {e}");
+            println!("[bilibili_enrich_media] 详情失败: {e}");
             None
         }
     }
