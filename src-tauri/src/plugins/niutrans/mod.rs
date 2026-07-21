@@ -395,7 +395,7 @@ mod tests {
         assert_eq!(s1, s2);
         assert_eq!(s1.len(), 32);
         // 拼接串固定
-        let expected = md5_hex("appId=id1&apikey=key1&from=en&srcText=hi&timestamp=100&to=zh");
+        let expected = md5_hex("apikey=key1&appId=id1&from=en&srcText=hi&timestamp=100&to=zh");
         assert_eq!(s1, expected);
     }
 
