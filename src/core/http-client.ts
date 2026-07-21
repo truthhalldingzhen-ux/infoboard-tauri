@@ -29,7 +29,10 @@ export async function httpGetJson<T = unknown>(url: string, signal?: AbortSignal
       try {
         return JSON.parse(text) as T
       } catch (e) {
-        throw new Error(`JSON 解析失败: ${e instanceof Error ? e.message : String(e)}`)
+        const head = text.slice(0, 40).replace(/[^\x20-\x7e]/g, '.')
+        throw new Error(
+          `JSON 解析失败: ${e instanceof Error ? e.message : String(e)} (body头: ${head})`
+        )
       }
     } catch (e) {
       // 不回退 fetch：打包 WebView 几乎一定失败，且会掩盖真实原因

@@ -63,8 +63,11 @@ fn build_client(proxy: Option<&str>) -> Result<reqwest::Client, String> {
 }
 
 async fn do_get(client: &reqwest::Client, url: &str) -> Result<String, String> {
+    // 显式声明可接受压缩；reqwest 开启 gzip/brotli/deflate feature 后会自动解压
     let resp = client
         .get(url)
+        .header("Accept", "application/json, text/plain, */*")
+        .header("Accept-Encoding", "gzip, deflate, br")
         .send()
         .await
         .map_err(|e| format!("网络错误: {e}"))?;
