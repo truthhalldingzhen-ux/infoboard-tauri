@@ -68,6 +68,20 @@ export default function App() {
           >
             显示/隐藏标题栏
           </button>
+          <button
+            className="w-full text-left px-3 py-1.5 text-xs transition-colors"
+            style={{ color: 'var(--text-primary)' }}
+            onMouseEnter={(e) =>
+              (e.currentTarget.style.backgroundColor = 'var(--bg-surface-hover)')
+            }
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent('log-console-toggle'))
+              setMenu(null)
+            }}
+          >
+            打开日志台 (F12)
+          </button>
           <div className="mx-2 my-1" style={{ borderTop: '1px solid var(--border-subtle)' }} />
           <button
             className="w-full text-left px-3 py-1.5 text-xs transition-colors"
