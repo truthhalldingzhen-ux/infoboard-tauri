@@ -72,10 +72,10 @@ export function useTranslate(): UseTranslateReturn {
       setResult(res)
       refreshCharCount()
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : '翻译失败'
-      console.log('[翻译] 失败:', msg)
-      if (msg === 'API_KEY_MISSING') {
-        setError('请先在设置中配置小牛翻译 API')
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error('[翻译] 失败:', msg)
+      if (msg.includes('API_KEY') || msg.includes('未配置') || msg.includes('API Key')) {
+        setError('请先在设置中配置小牛翻译 App ID 与 API Key')
       } else {
         setError(msg || '翻译失败')
       }

@@ -1,7 +1,5 @@
 /**
  * 小牛翻译 — Tauri command invoke 封装
- *
- * 提供 6 个方法，对应后端 6 个 niutrans_* 命令
  */
 
 import { invoke } from '@tauri-apps/api/core'
@@ -13,50 +11,60 @@ export interface TranslateConfig {
   api_key_mask: string
 }
 
-/**
- * 翻译文本
- *
- * @param text - 要翻译的文本
- * @param targetLang - 目标语言代码（如 'zh', 'en', 'ja'）
- */
-export async function translate(text: string, targetLang: string): Promise<TranslateResult> {
-  return await invoke<TranslateResult>('niutrans_translate', {
-    text,
-    targetLang,
-  })
+/** 把 Tauri invoke 错误转成可读字符串（常为 string，不是 Error） */
+export function formatInvokeError(err: unknown): string {
+  if (err instanceof Error) return err.message || String(err)
+  if (typeof err === 'string') return err
+  if (err && typeof err === 'object') {
+    const o = err as Record<string, unknown>
+    if (typeof o.message === 'string') return o.message
+    try {
+      return JSON.stringify(err)
+    } catch {
+      return String(err)
+    }
+  }
+  return String(err ?? '未知错误')
 }
 
 /**
- * 设置 API Key
+ * 翻译文本
+ * @param text 原文
+ * @param targetLang 目标语言（如 zh / en）
+ * @param fromLang 源语言，默认 auto
  */
+export async function translate(
+  text: string,
+  targetLang: string,
+  fromLang = 'auto'
+): Promise<TranslateResult> {
+  try {
+    return await invoke<TranslateResult>('niutrans_translate', {
+      text,
+      from: fromLang,
+      to: targetLang,
+    })
+  } catch (e) {
+    throw new Error(formatInvokeError(e))
+  }
+}
+
 export async function setApiKey(key: string): Promise<void> {
   await invoke('niutrans_set_api_key', { key })
 }
 
-/**
- * 设置 App ID
- */
 export async function setAppId(id: string): Promise<void> {
-  await invoke('niutrans_set_app_id', { id })
+  await invoke('niutrans_set_app_id', { appId: id })
 }
 
-/**
- * 检查是否已配置 API Key 和 App ID
- */
 export async function hasApiKey(): Promise<boolean> {
   return await invoke<boolean>('niutrans_has_api_key')
 }
 
-/**
- * 获取配置信息（带掩码）
- */
 export async function getConfig(): Promise<TranslateConfig> {
   return await invoke<TranslateConfig>('niutrans_get_config')
 }
 
-/**
- * 获取累计翻译字符数
- */
 export async function getCharCount(): Promise<number> {
   return await invoke<number>('niutrans_get_char_count')
 }
