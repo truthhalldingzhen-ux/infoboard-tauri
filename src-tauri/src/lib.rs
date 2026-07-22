@@ -43,6 +43,7 @@ pub fn run() {
                         println!("[快捷键] Ctrl+Shift+I 触发");
                         // 切换主窗口显隐
                         if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.set_skip_taskbar(true);
                             if window.is_visible().unwrap_or(false) {
                                 println!("[快捷键] 隐藏窗口");
                                 let _ = window.hide();
@@ -66,6 +67,8 @@ pub fn run() {
             // 恢复上次关闭时的窗口大小和位置
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.restore_state(StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED);
+                // 托盘应用：不在任务栏显示图标
+                let _ = window.set_skip_taskbar(true);
             }
             // 注册全局快捷键 Ctrl+Shift+I
             {

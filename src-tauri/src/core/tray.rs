@@ -22,9 +22,11 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(window) = app.get_webview_window("main") {
                     if window.is_visible().unwrap_or(false) {
                         println!("[托盘] 菜单 → 隐藏窗口");
+                        let _ = window.set_skip_taskbar(true);
                         let _ = window.hide();
                     } else {
                         println!("[托盘] 菜单 → 显示窗口");
+                        let _ = window.set_skip_taskbar(true);
                         let _ = window.show();
                         let _ = window.set_focus();
                     }
@@ -47,9 +49,11 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(window) = app.get_webview_window("main") {
                     if window.is_visible().unwrap_or(false) {
                         println!("[托盘] 单击图标 → 隐藏窗口");
+                        let _ = window.set_skip_taskbar(true);
                         let _ = window.hide();
                     } else {
                         println!("[托盘] 单击图标 → 显示窗口");
+                        let _ = window.set_skip_taskbar(true);
                         let _ = window.show();
                         let _ = window.set_focus();
                     }
@@ -69,6 +73,7 @@ pub fn handle_run_event(app: &AppHandle, event: RunEvent) {
                 println!("[窗口] 关闭按钮 → 拦截并隐藏到托盘");
                 api.prevent_close();
                 if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_skip_taskbar(true);
                     let _ = window.hide();
                 }
             }

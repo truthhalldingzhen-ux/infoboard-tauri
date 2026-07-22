@@ -20,6 +20,7 @@ pub fn window_maximize(window: WebviewWindow) -> Result<(), String> {
 #[tauri::command]
 pub fn window_close(window: WebviewWindow) -> Result<(), String> {
     println!("[窗口] 隐藏到托盘");
+    let _ = window.set_skip_taskbar(true);
     window.hide().map_err(|e| e.to_string())
 }
 
